@@ -33,11 +33,6 @@ def run_app() -> None:
     apply_theme()
     require_login()
 
-    st.markdown("<div class='sidebar-reopen-wrap'>", unsafe_allow_html=True)
-    if st.button("▸", key="sidebar_reopen_button", help="Reopen sidebar"):
-        st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-
     logout_clicked, uploaded_file = render_datavision_sidebar()
 
     if logout_clicked:
@@ -88,7 +83,7 @@ def run_app() -> None:
             "Clustering",
             "PCA",
             "Feature Importance",
-            "Supervised ML",
+            "Linear/Logistic/Tree/RF",
             "Time Series",
             "Auto Insights",
         ]

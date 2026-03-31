@@ -27,6 +27,34 @@ header {
   visibility: hidden !important;
 }
 
+[data-testid="collapsedControl"] {
+  visibility: visible !important;
+  position: fixed;
+  top: 0.85rem;
+  left: 0.85rem;
+  z-index: 1002;
+}
+
+[data-testid="collapsedControl"] button {
+  border-radius: 999px;
+  min-height: 2rem;
+  min-width: 2rem;
+  padding: 0;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: linear-gradient(
+    140deg,
+    rgba(12, 21, 34, 0.95),
+    rgba(18, 35, 56, 0.9)
+  );
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+}
+
+[data-testid="collapsedControl"] button:hover {
+  border-color: rgba(57, 224, 192, 0.65);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.34);
+}
+
 body,
 .stApp {
   color: var(--ink);
@@ -200,52 +228,8 @@ h4 {
   white-space: nowrap;
 }
 
-.sidebar-reopen-wrap {
-  position: fixed;
-  top: 0.85rem;
-  left: 0.85rem;
-  z-index: 1000;
-  display: none;
-}
-
-.stApp:has([data-testid="stSidebar"][aria-expanded="false"])
-  .sidebar-reopen-wrap {
-  display: block;
-}
-
-.stApp:has([data-testid="stSidebar"][aria-expanded="true"])
-  .sidebar-reopen-wrap {
-  display: none;
-}
-
-.sidebar-reopen-wrap .stButton {
-  margin: 0;
-}
-
-.sidebar-reopen-wrap .stButton > button {
-  border-radius: 999px;
-  min-height: 2rem;
-  min-width: 2rem;
-  padding: 0;
-  font-size: 1rem;
-  line-height: 1;
-  border: 1px solid var(--line);
-  color: var(--ink);
-  background: linear-gradient(
-    140deg,
-    rgba(12, 21, 34, 0.95),
-    rgba(18, 35, 56, 0.9)
-  );
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
-}
-
-.sidebar-reopen-wrap .stButton > button:hover {
-  border-color: rgba(57, 224, 192, 0.65);
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.34);
-}
-
 @media (max-width: 1024px) {
-  .sidebar-reopen-wrap {
+  [data-testid="collapsedControl"] {
     top: 0.65rem;
     left: 0.6rem;
   }
