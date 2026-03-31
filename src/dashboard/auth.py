@@ -23,10 +23,18 @@ def require_login() -> None:
     if st.session_state.get("authenticated"):
         return
 
-    st.markdown("## DataVision Secure Access")
-    st.caption("Enter credentials to unlock the analytics workspace.")
+    st.markdown('<div class="login-view-marker"></div>', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <section class="login-copy">
+            <h1>DataVision Secure Access</h1>
+            <p>Enter credentials to unlock the analytics workspace.</p>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    _, center, _ = st.columns([1.1, 1.7, 1.1])
+    _, center, _ = st.columns([1.0, 1.25, 1.0])
     with center:
         with st.form("login", clear_on_submit=False):
             username = st.text_input("Username", value="admin")

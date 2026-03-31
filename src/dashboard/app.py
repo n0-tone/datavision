@@ -22,7 +22,7 @@ from .visuals import (
 
 
 def run_app() -> None:
-    st.set_page_config(page_title="DataVision", page_icon=":bar_chart:", layout="wide")
+    st.set_page_config(page_title="DataVision", page_icon="📊", layout="wide")
 
     apply_theme()
     require_login()
