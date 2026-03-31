@@ -674,10 +674,18 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
         st.warning("No usable feature columns available.")
         return
 
+    default_features = [
+        c
+        for c in candidate_features
+        if pd.api.types.is_numeric_dtype(df[c]) or df[c].nunique(dropna=True) <= 80
+    ]
+    if not default_features:
+        default_features = candidate_features
+
     features = st.multiselect(
         "Feature columns",
         options=candidate_features,
-        default=candidate_features[: min(8, len(candidate_features))],
+        default=default_features[: min(8, len(default_features))],
         key="sup_features",
     )
     if not features:
@@ -691,72 +699,35 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
         key="sup_missing_strategy",
     )
     test_size = st.slider("Test set (%)", 10, 40, 20, key="sup_test_size")
-    max_rows = st.slider("Max rows for training", 200, 30000, 10000, 200, key="sup_max_rows")
-
-    x_raw = df[features].copy()
-    y_raw = df[target].copy()
-
-    if missing_strategy == "Drop rows with missing values":
-        valid_mask = x_raw.notna().all(axis=1) & y_raw.notna()
-        x_raw = x_raw.loc[valid_mask]
-        y_raw = y_raw.loc[valid_mask]
-
-    feature_fill_values: dict[str, float | str] = {}
-    for col in x_raw.columns:
-        if pd.api.types.is_numeric_dtype(x_raw[col]):
-            numeric_col = pd.to_numeric(x_raw[col], errors="coerce")
-            if numeric_col.notna().any():
-                fill_value = float(numeric_col.median())
-            else:
-                fill_value = 0.0
-            feature_fill_values[col] = fill_value
-            if missing_strategy != "Drop rows with missing values":
-                x_raw[col] = numeric_col.fillna(fill_value)
-            else:
-                x_raw[col] = numeric_col
-        else:
-            mode_values = x_raw[col].astype(str).replace("nan", np.nan).mode(dropna=True)
-            fill_value = mode_values.iloc[0] if not mode_values.empty else "<missing>"
-            feature_fill_values[col] = str(fill_value)
-            if missing_strategy != "Drop rows with missing values":
-                x_raw[col] = x_raw[col].astype(str).replace("nan", np.nan).fillna(str(fill_value))
-            else:
-                x_raw[col] = x_raw[col].astype(str)
+    max_rows = st.slider("Max rows for training", 200, 20000, 4000, 200, key="sup_max_rows")
+    max_category_levels = st.slider(
+        "Max category levels per categorical feature",
+        10,
+        200,
+        60,
+        5,
+        key="sup_max_category_levels",
+        help="Rare categories are grouped into <other> to keep training responsive.",
+    )
+    max_encoded_features = st.slider(
+        "Max encoded feature columns",
+        100,
+        3000,
+        1200,
+        50,
+        key="sup_max_encoded_features",
+        help="Hard cap after one-hot encoding to avoid memory spikes.",
+    )
 
     resolved_mode = mode
     if mode == "Auto":
-        numeric_target = pd.to_numeric(y_raw, errors="coerce")
+        target_preview = pd.to_numeric(df[target], errors="coerce")
         is_regression_like = (
-            pd.api.types.is_numeric_dtype(y_raw)
-            and numeric_target.notna().mean() >= 0.9
-            and numeric_target.nunique(dropna=True) > 14
+            pd.api.types.is_numeric_dtype(df[target])
+            and target_preview.notna().mean() >= 0.9
+            and target_preview.nunique(dropna=True) > 14
         )
         resolved_mode = "Regression" if is_regression_like else "Classification"
-
-    if resolved_mode == "Regression":
-        y_data = pd.to_numeric(y_raw, errors="coerce")
-        valid_mask = y_data.notna()
-        x_data = x_raw.loc[valid_mask]
-        y_data = y_data.loc[valid_mask]
-    else:
-        y_labels = y_raw.fillna("<missing>").astype(str)
-        y_codes, classes = pd.factorize(y_labels, sort=True)
-        x_data = x_raw
-        y_data = pd.Series(y_codes, index=y_labels.index)
-
-    if len(x_data) < 40:
-        st.warning("Not enough valid rows for supervised training.")
-        return
-
-    if len(x_data) > max_rows:
-        sampled_idx = x_data.sample(max_rows, random_state=42).index
-        x_data = x_data.loc[sampled_idx]
-        y_data = y_data.loc[sampled_idx]
-
-    x_encoded = pd.get_dummies(x_data, drop_first=False)
-    if x_encoded.empty:
-        st.warning("Feature encoding produced an empty matrix.")
-        return
 
     if resolved_mode == "Regression":
         model_name = st.selectbox(
@@ -771,73 +742,269 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
             key="sup_model_clf",
         )
 
-    test_fraction = test_size / 100.0
-    stratify = None
-    if resolved_mode == "Classification":
-        class_counts = y_data.value_counts()
-        if len(class_counts) > 1 and class_counts.min() >= 2:
-            stratify = y_data
-
-    try:
-        x_train, x_test, y_train, y_test = train_test_split(
-            x_encoded,
-            y_data,
-            test_size=test_fraction,
-            random_state=42,
-            stratify=stratify,
-        )
-    except ValueError as exc:
-        st.warning(f"Unable to split data for training: {exc}")
-        return
+    model_params: dict[str, int] = {}
 
     if resolved_mode == "Regression":
         if model_name == "Linear Regression":
-            model = LinearRegression()
+            pass
         elif model_name == "Decision Tree Regressor":
             max_depth = st.slider("Tree max depth", 2, 40, 10, key="sup_reg_tree_depth")
-            model = DecisionTreeRegressor(max_depth=max_depth, random_state=42)
+            model_params["max_depth"] = max_depth
         else:
-            n_estimators = st.slider("Forest trees", 50, 600, 260, 10, key="sup_reg_rf_estimators")
+            n_estimators = st.slider("Forest trees", 50, 400, 160, 10, key="sup_reg_rf_estimators")
             max_depth = st.slider("Forest max depth", 2, 40, 12, key="sup_reg_rf_depth")
-            model = RandomForestRegressor(
-                n_estimators=n_estimators,
-                max_depth=max_depth,
-                random_state=42,
-                n_jobs=-1,
-            )
+            model_params["n_estimators"] = n_estimators
+            model_params["max_depth"] = max_depth
     else:
         if model_name == "Logistic Regression":
-            model = LogisticRegression(max_iter=2400)
+            pass
         elif model_name == "Decision Tree Classifier":
             max_depth = st.slider("Tree max depth", 2, 40, 10, key="sup_clf_tree_depth")
-            model = DecisionTreeClassifier(max_depth=max_depth, random_state=42)
+            model_params["max_depth"] = max_depth
         else:
-            n_estimators = st.slider("Forest trees", 50, 600, 260, 10, key="sup_clf_rf_estimators")
+            n_estimators = st.slider("Forest trees", 50, 400, 160, 10, key="sup_clf_rf_estimators")
             max_depth = st.slider("Forest max depth", 2, 40, 12, key="sup_clf_rf_depth")
-            model = RandomForestClassifier(
-                n_estimators=n_estimators,
-                max_depth=max_depth,
-                random_state=42,
-                n_jobs=-1,
-            )
+            model_params["n_estimators"] = n_estimators
+            model_params["max_depth"] = max_depth
 
-    model.fit(x_train, y_train)
-    y_pred = model.predict(x_test)
+    config_signature = (
+        target,
+        tuple(features),
+        mode,
+        missing_strategy,
+        test_size,
+        max_rows,
+        max_category_levels,
+        max_encoded_features,
+        model_name,
+        tuple(sorted(model_params.items())),
+        len(df),
+        tuple(df.columns),
+    )
 
-    st.markdown(f"##### Evaluation ({resolved_mode})")
-    if resolved_mode == "Regression":
-        mae = mean_absolute_error(y_test, y_pred)
-        rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
-        r2 = r2_score(y_test, y_pred)
+    artifact_key = "sup_model_artifact"
+    signature_key = "sup_model_signature"
+    status = st.empty()
+    if st.button("Train / Refresh Model", key="sup_train_button"):
+        with st.spinner("Training model..."):
+            x_raw = df[features].copy()
+            y_raw = df[target].copy()
 
+            if missing_strategy == "Drop rows with missing values":
+                valid_mask = x_raw.notna().all(axis=1) & y_raw.notna()
+                x_raw = x_raw.loc[valid_mask]
+                y_raw = y_raw.loc[valid_mask]
+
+            feature_fill_values: dict[str, float | str] = {}
+            category_maps: dict[str, list[str]] = {}
+            numeric_features: list[str] = []
+            categorical_features: list[str] = []
+
+            for col in x_raw.columns:
+                if pd.api.types.is_numeric_dtype(x_raw[col]):
+                    numeric_col = pd.to_numeric(x_raw[col], errors="coerce")
+                    if numeric_col.notna().any():
+                        fill_value = float(numeric_col.median())
+                    else:
+                        fill_value = 0.0
+                    feature_fill_values[col] = fill_value
+                    if missing_strategy != "Drop rows with missing values":
+                        x_raw[col] = numeric_col.fillna(fill_value)
+                    else:
+                        x_raw[col] = numeric_col
+                    numeric_features.append(col)
+                else:
+                    text_values = x_raw[col].astype(str).replace("nan", np.nan)
+                    mode_values = text_values.mode(dropna=True)
+                    fill_value = mode_values.iloc[0] if not mode_values.empty else "<missing>"
+                    feature_fill_values[col] = str(fill_value)
+                    filled = text_values.fillna(str(fill_value))
+                    top_values = filled.value_counts().head(max_category_levels).index.tolist()
+                    if not top_values:
+                        top_values = [str(fill_value)]
+                    x_raw[col] = filled.where(filled.isin(top_values), "<other>")
+                    category_maps[col] = top_values
+                    categorical_features.append(col)
+
+            resolved_mode = mode
+            if mode == "Auto":
+                numeric_target = pd.to_numeric(y_raw, errors="coerce")
+                is_regression_like = (
+                    pd.api.types.is_numeric_dtype(y_raw)
+                    and numeric_target.notna().mean() >= 0.9
+                    and numeric_target.nunique(dropna=True) > 14
+                )
+                resolved_mode = "Regression" if is_regression_like else "Classification"
+
+            if resolved_mode == "Regression":
+                y_data = pd.to_numeric(y_raw, errors="coerce")
+                valid_mask = y_data.notna()
+                x_data = x_raw.loc[valid_mask]
+                y_data = y_data.loc[valid_mask]
+                class_labels: list[str] = []
+            else:
+                y_labels = y_raw.fillna("<missing>").astype(str)
+                y_codes, classes = pd.factorize(y_labels, sort=True)
+                x_data = x_raw
+                y_data = pd.Series(y_codes, index=y_labels.index)
+                class_labels = [str(item) for item in classes]
+
+            if len(x_data) < 40:
+                st.warning("Not enough valid rows for supervised training.")
+                return
+
+            if len(x_data) > max_rows:
+                sampled_idx = x_data.sample(max_rows, random_state=42).index
+                x_data = x_data.loc[sampled_idx]
+                y_data = y_data.loc[sampled_idx]
+
+            x_encoded = pd.get_dummies(x_data, drop_first=False)
+            if x_encoded.empty:
+                st.warning("Feature encoding produced an empty matrix.")
+                return
+
+            dropped_encoded = 0
+            if x_encoded.shape[1] > max_encoded_features:
+                keep_numeric = [c for c in x_encoded.columns if c in numeric_features]
+                categorical_encoded = [c for c in x_encoded.columns if c not in keep_numeric]
+                remaining_budget = max(max_encoded_features - len(keep_numeric), 0)
+                if remaining_budget == 0:
+                    x_encoded = x_encoded[keep_numeric]
+                    dropped_encoded = len(categorical_encoded)
+                else:
+                    freq_rank = x_encoded[categorical_encoded].sum(axis=0).sort_values(ascending=False)
+                    keep_categorical = freq_rank.head(remaining_budget).index.tolist()
+                    x_encoded = x_encoded[keep_numeric + keep_categorical]
+                    dropped_encoded = len(categorical_encoded) - len(keep_categorical)
+
+            test_fraction = test_size / 100.0
+            stratify = None
+            if resolved_mode == "Classification":
+                class_counts = y_data.value_counts()
+                if len(class_counts) < 2:
+                    st.warning("Classification target needs at least two classes.")
+                    return
+                if len(class_counts) > 120:
+                    st.warning(
+                        "Target has too many classes for responsive training. "
+                        "Try regression mode or choose a lower-cardinality target."
+                    )
+                    return
+                if class_counts.min() >= 2:
+                    stratify = y_data
+
+            try:
+                x_train, x_test, y_train, y_test = train_test_split(
+                    x_encoded,
+                    y_data,
+                    test_size=test_fraction,
+                    random_state=42,
+                    stratify=stratify,
+                )
+            except ValueError as exc:
+                st.warning(f"Unable to split data for training: {exc}")
+                return
+
+            if resolved_mode == "Regression":
+                if model_name == "Linear Regression":
+                    model = LinearRegression()
+                elif model_name == "Decision Tree Regressor":
+                    model = DecisionTreeRegressor(max_depth=model_params["max_depth"], random_state=42)
+                else:
+                    model = RandomForestRegressor(
+                        n_estimators=model_params["n_estimators"],
+                        max_depth=model_params["max_depth"],
+                        random_state=42,
+                        n_jobs=-1,
+                    )
+            else:
+                if model_name == "Logistic Regression":
+                    model = LogisticRegression(max_iter=1200, solver="saga", n_jobs=-1)
+                elif model_name == "Decision Tree Classifier":
+                    model = DecisionTreeClassifier(max_depth=model_params["max_depth"], random_state=42)
+                else:
+                    model = RandomForestClassifier(
+                        n_estimators=model_params["n_estimators"],
+                        max_depth=model_params["max_depth"],
+                        random_state=42,
+                        n_jobs=-1,
+                    )
+
+            model.fit(x_train, y_train)
+            y_pred = model.predict(x_test)
+
+            if resolved_mode == "Regression":
+                metrics = {
+                    "mae": mean_absolute_error(y_test, y_pred),
+                    "rmse": float(np.sqrt(mean_squared_error(y_test, y_pred))),
+                    "r2": r2_score(y_test, y_pred),
+                }
+            else:
+                metrics = {
+                    "accuracy": accuracy_score(y_test, y_pred),
+                    "precision": precision_score(y_test, y_pred, average="weighted", zero_division=0),
+                    "recall": recall_score(y_test, y_pred, average="weighted", zero_division=0),
+                    "f1": f1_score(y_test, y_pred, average="weighted", zero_division=0),
+                }
+
+            if hasattr(model, "feature_importances_"):
+                importance = pd.DataFrame(
+                    {"feature": x_encoded.columns, "importance": model.feature_importances_}
+                ).sort_values("importance", ascending=False)
+            elif hasattr(model, "coef_"):
+                if np.ndim(model.coef_) == 1:
+                    coef_values = model.coef_
+                else:
+                    coef_values = np.mean(np.abs(model.coef_), axis=0)
+                importance = pd.DataFrame({"feature": x_encoded.columns, "importance": np.abs(coef_values)})
+                importance = importance.sort_values("importance", ascending=False)
+            else:
+                importance = pd.DataFrame(columns=["feature", "importance"])
+
+            st.session_state[artifact_key] = {
+                "model": model,
+                "resolved_mode": resolved_mode,
+                "target": target,
+                "features": features,
+                "feature_fill_values": feature_fill_values,
+                "category_maps": category_maps,
+                "x_columns": x_encoded.columns.tolist(),
+                "metrics": metrics,
+                "importance": importance,
+                "y_test": y_test,
+                "y_pred": y_pred,
+                "class_labels": class_labels,
+                "pred_df": pd.DataFrame({"actual": y_test, "predicted": y_pred}),
+                "dropped_encoded": dropped_encoded,
+            }
+            st.session_state[signature_key] = config_signature
+
+        status.success("Model trained. You can now run predictions below.")
+
+    artifact = st.session_state.get(artifact_key)
+    current_signature = st.session_state.get(signature_key)
+    if artifact is None:
+        st.info("Configure settings and click Train / Refresh Model.")
+        return
+    if current_signature != config_signature:
+        st.info("Configuration changed. Click Train / Refresh Model to update results.")
+        return
+
+    if artifact.get("dropped_encoded", 0) > 0:
+        st.caption(
+            f"Dropped {artifact['dropped_encoded']} low-frequency encoded columns "
+            "to keep training responsive."
+        )
+
+    st.markdown(f"##### Evaluation ({artifact['resolved_mode']})")
+    if artifact["resolved_mode"] == "Regression":
         m1, m2, m3 = st.columns(3)
-        m1.metric("MAE", f"{mae:,.4f}")
-        m2.metric("RMSE", f"{rmse:,.4f}")
-        m3.metric("R²", f"{r2:.4f}")
+        m1.metric("MAE", f"{artifact['metrics']['mae']:,.4f}")
+        m2.metric("RMSE", f"{artifact['metrics']['rmse']:,.4f}")
+        m3.metric("R²", f"{artifact['metrics']['r2']:.4f}")
 
-        pred_df = pd.DataFrame({"actual": y_test, "predicted": y_pred})
         fig_pred = px.scatter(
-            pred_df,
+            artifact["pred_df"],
             x="actual",
             y="predicted",
             title="Actual vs Predicted",
@@ -846,46 +1013,31 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
         fig_pred.update_layout(margin=dict(l=10, r=10, t=45, b=10))
         st.plotly_chart(fig_pred, width="stretch")
     else:
-        acc = accuracy_score(y_test, y_pred)
-        precision = precision_score(y_test, y_pred, average="weighted", zero_division=0)
-        recall = recall_score(y_test, y_pred, average="weighted", zero_division=0)
-        f1 = f1_score(y_test, y_pred, average="weighted", zero_division=0)
-
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Accuracy", f"{acc:.4f}")
-        m2.metric("Precision", f"{precision:.4f}")
-        m3.metric("Recall", f"{recall:.4f}")
-        m4.metric("F1", f"{f1:.4f}")
+        m1.metric("Accuracy", f"{artifact['metrics']['accuracy']:.4f}")
+        m2.metric("Precision", f"{artifact['metrics']['precision']:.4f}")
+        m3.metric("Recall", f"{artifact['metrics']['recall']:.4f}")
+        m4.metric("F1", f"{artifact['metrics']['f1']:.4f}")
 
-        class_labels = [str(item) for item in classes] if "classes" in locals() else []
-        label_ids = list(range(len(class_labels))) if class_labels else None
-        cm = confusion_matrix(y_test, y_pred, labels=label_ids)
-        fig_cm = px.imshow(
-            cm,
-            text_auto=True,
-            labels={"x": "Predicted", "y": "Actual", "color": "Count"},
-            x=class_labels if class_labels else None,
-            y=class_labels if class_labels else None,
-            color_continuous_scale=[[0, "#122038"], [1, "#2de2c4"]],
-            title="Confusion Matrix",
-        )
-        fig_cm.update_layout(margin=dict(l=10, r=10, t=45, b=10), height=420)
-        st.plotly_chart(fig_cm, width="stretch")
-
-    if hasattr(model, "feature_importances_"):
-        importance = pd.DataFrame(
-            {"feature": x_encoded.columns, "importance": model.feature_importances_}
-        ).sort_values("importance", ascending=False)
-    elif hasattr(model, "coef_"):
-        if np.ndim(model.coef_) == 1:
-            coef_values = model.coef_
+        class_labels = artifact.get("class_labels", [])
+        if len(class_labels) <= 30:
+            label_ids = list(range(len(class_labels))) if class_labels else None
+            cm = confusion_matrix(artifact["y_test"], artifact["y_pred"], labels=label_ids)
+            fig_cm = px.imshow(
+                cm,
+                text_auto=True,
+                labels={"x": "Predicted", "y": "Actual", "color": "Count"},
+                x=class_labels if class_labels else None,
+                y=class_labels if class_labels else None,
+                color_continuous_scale=[[0, "#122038"], [1, "#2de2c4"]],
+                title="Confusion Matrix",
+            )
+            fig_cm.update_layout(margin=dict(l=10, r=10, t=45, b=10), height=420)
+            st.plotly_chart(fig_cm, width="stretch")
         else:
-            coef_values = np.mean(np.abs(model.coef_), axis=0)
-        importance = pd.DataFrame({"feature": x_encoded.columns, "importance": np.abs(coef_values)})
-        importance = importance.sort_values("importance", ascending=False)
-    else:
-        importance = pd.DataFrame(columns=["feature", "importance"])
+            st.info("Confusion matrix hidden for high-cardinality targets (>30 classes).")
 
+    importance = artifact.get("importance", pd.DataFrame(columns=["feature", "importance"]))
     if not importance.empty:
         st.markdown("##### Model Signals")
         top_importance = importance.head(20).sort_values("importance")
@@ -904,9 +1056,9 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
     st.markdown("##### Prediction / Classification Form")
     with st.form("sup_prediction_form"):
         input_values: dict[str, float | str] = {}
-        for col in features:
+        for col in artifact["features"]:
             if pd.api.types.is_numeric_dtype(df[col]):
-                default_value = float(feature_fill_values.get(col, 0.0))
+                default_value = float(artifact["feature_fill_values"].get(col, 0.0))
                 input_values[col] = st.number_input(
                     f"{col}",
                     value=default_value,
@@ -914,12 +1066,13 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
                     key=f"sup_form_num_{col}",
                 )
             else:
-                options = sorted(df[col].dropna().astype(str).unique().tolist())
-                if not options:
-                    options = ["<missing>"]
-                default_choice = str(feature_fill_values.get(col, options[0]))
+                options = artifact["category_maps"].get(col, [])
+                options = options[: max_category_levels]
+                if "<other>" not in options:
+                    options = options + ["<other>"]
+                default_choice = str(artifact["feature_fill_values"].get(col, options[0]))
                 if default_choice not in options:
-                    options = [default_choice] + options
+                    default_choice = "<other>"
                 input_values[col] = st.selectbox(
                     f"{col}",
                     options=options,
@@ -934,27 +1087,28 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
         for col in prediction_row.columns:
             if pd.api.types.is_numeric_dtype(df[col]):
                 numeric_value = pd.to_numeric(prediction_row[col], errors="coerce")
-                fallback_value = float(feature_fill_values.get(col, 0.0))
+                fallback_value = float(artifact["feature_fill_values"].get(col, 0.0))
                 prediction_row[col] = numeric_value.fillna(fallback_value)
             else:
-                prediction_row[col] = prediction_row[col].astype(str)
+                value = prediction_row[col].astype(str)
+                allowed = set(artifact["category_maps"].get(col, []))
+                prediction_row[col] = value.where(value.isin(allowed), "<other>")
 
         row_encoded = pd.get_dummies(prediction_row, drop_first=False)
-        row_encoded = row_encoded.reindex(columns=x_encoded.columns, fill_value=0)
-        pred_value = model.predict(row_encoded)[0]
+        row_encoded = row_encoded.reindex(columns=artifact["x_columns"], fill_value=0)
+        pred_value = artifact["model"].predict(row_encoded)[0]
 
-        if resolved_mode == "Regression":
-            st.success(f"Predicted {target}: {float(pred_value):,.4f}")
+        if artifact["resolved_mode"] == "Regression":
+            st.success(f"Predicted {artifact['target']}: {float(pred_value):,.4f}")
         else:
-            class_labels = [str(item) for item in classes] if "classes" in locals() else []
+            class_labels = artifact.get("class_labels", [])
             predicted_label = class_labels[int(pred_value)] if class_labels else str(pred_value)
-            st.success(f"Predicted class for {target}: {predicted_label}")
+            st.success(f"Predicted class for {artifact['target']}: {predicted_label}")
 
-            if hasattr(model, "predict_proba") and class_labels:
-                probs = model.predict_proba(row_encoded)[0]
-                prob_df = pd.DataFrame({"class": class_labels, "probability": probs}).sort_values(
-                    "probability", ascending=False
-                )
+            if hasattr(artifact["model"], "predict_proba") and class_labels:
+                probs = artifact["model"].predict_proba(row_encoded)[0]
+                prob_df = pd.DataFrame({"class": class_labels, "probability": probs})
+                prob_df = prob_df.sort_values("probability", ascending=False).head(10)
                 st.dataframe(prob_df, width="stretch", hide_index=True)
 
 
