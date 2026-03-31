@@ -5,7 +5,7 @@ import streamlit as st
 from src.components.sidebar import render_datavision_sidebar
 
 from .auth import require_login
-from .data_ops import apply_sidebar_filters, load_csv, split_columns
+from .data_ops import apply_sidebar_filters, detect_datetime_candidates, load_csv, split_columns
 from .theme import apply_theme
 from .visuals import (
     render_advanced_stats_tab,
@@ -60,6 +60,7 @@ def run_app() -> None:
         return
 
     numeric, categorical = split_columns(filtered_df)
+    datetime_candidates = detect_datetime_candidates(filtered_df)
 
     render_hero(filtered_df)
 
@@ -72,9 +73,14 @@ def run_app() -> None:
         "PCA",
         "Feature Importance",
         "Supervised Models",
-        "Time Series",
         "Auto Insights",
     ]
+
+    if datetime_candidates and numeric:
+        sections.insert(-1, "Time Series")
+
+    if st.session_state.get("section_nav") not in sections:
+        st.session_state.section_nav = sections[0]
 
     active_section = st.radio(
         "Section",
@@ -93,9 +99,11 @@ def run_app() -> None:
         "PCA": lambda: render_pca_tab(filtered_df, numeric),
         "Feature Importance": lambda: render_feature_importance_tab(filtered_df),
         "Supervised Models": lambda: render_supervised_models_tab(filtered_df),
-        "Time Series": lambda: render_time_series_tab(filtered_df, numeric),
         "Auto Insights": lambda: render_insights_tab(filtered_df, numeric),
     }
+
+    if "Time Series" in sections:
+        render_map["Time Series"] = lambda: render_time_series_tab(filtered_df, numeric, datetime_candidates)
 
     heavy_sections = {"Clustering", "PCA", "Feature Importance", "Supervised Models"}
     if active_section in heavy_sections:

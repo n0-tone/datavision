@@ -958,23 +958,16 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
                 st.dataframe(prob_df, width="stretch", hide_index=True)
 
 
-def render_time_series_tab(df: pd.DataFrame, numeric: list[str]) -> None:
+def render_time_series_tab(
+    df: pd.DataFrame,
+    numeric: list[str],
+    datetime_candidates: list[str] | None = None,
+) -> None:
     st.subheader("Time Series")
-    candidates = detect_datetime_candidates(df)
-
+    candidates = datetime_candidates if datetime_candidates is not None else detect_datetime_candidates(df)
     if not candidates:
-        fallback_candidates = [
-            c
-            for c in df.columns
-            if pd.api.types.is_datetime64_any_dtype(df[c])
-            or pd.api.types.is_object_dtype(df[c])
-            or pd.api.types.is_string_dtype(df[c])
-        ]
-        if not fallback_candidates:
-            st.info("No likely datetime columns detected.")
-            return
-        st.info("No likely datetime columns detected automatically. Pick a column to try parsing.")
-        candidates = fallback_candidates
+        st.info("No likely datetime columns detected in the current dataset/filter.")
+        return
 
     if not numeric:
         st.info("No numeric columns available for time series values.")

@@ -24,50 +24,15 @@ footer {
   display: none !important;
 }
 header {
-  visibility: visible !important;
-}
-
-[data-testid="stHeader"] {
-  background: transparent !important;
-}
-
-[data-testid="stToolbar"],
-[data-testid="stDecoration"],
-[data-testid="stStatusWidget"] {
-  display: none !important;
+  visibility: hidden !important;
 }
 
 [data-testid="collapsedControl"],
-[data-testid="stSidebarCollapsedControl"] {
-  visibility: visible !important;
-  position: fixed;
-  top: 0.85rem;
-  left: 0.85rem;
-  z-index: 1002;
-}
-
-[data-testid="collapsedControl"] button,
-[data-testid="stSidebarCollapsedControl"] button,
-button[aria-label="Open sidebar"] {
-  border-radius: 999px;
-  min-height: 2rem;
-  min-width: 2rem;
-  padding: 0;
-  border: 1px solid var(--line);
-  color: var(--ink);
-  background: linear-gradient(
-    140deg,
-    rgba(12, 21, 34, 0.95),
-    rgba(18, 35, 56, 0.9)
-  );
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
-}
-
-[data-testid="collapsedControl"] button:hover,
-[data-testid="stSidebarCollapsedControl"] button:hover,
-button[aria-label="Open sidebar"]:hover {
-  border-color: rgba(57, 224, 192, 0.65);
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.34);
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="stSidebarCollapseButton"],
+button[aria-label="Open sidebar"],
+button[aria-label="Close sidebar"] {
+  display: none !important;
 }
 
 body,
@@ -241,14 +206,6 @@ h4 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-@media (max-width: 1024px) {
-  [data-testid="collapsedControl"],
-  [data-testid="stSidebarCollapsedControl"] {
-    top: 0.65rem;
-    left: 0.6rem;
-  }
 }
 
 .hero-card {
