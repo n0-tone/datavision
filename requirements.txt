@@ -9,3 +9,4 @@ streamlit-pandas-profiling
 plotly
 pymongo
 tk
+scikit-learn
