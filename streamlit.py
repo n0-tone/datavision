@@ -1,20 +1,104 @@
 import hmac
 import os
-import re
-import sqlite3
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
 
 
-st.set_page_config(
-    page_title="CSVDash - Protected",
-    page_icon=":bar_chart:",
-    layout="wide",
-)
+st.set_page_config(page_title="CSVDash", page_icon="📊", layout="wide")
+
+
+def inject_styles() -> None:
+    st.markdown(
+        """
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap');
+
+            :root {
+                --bg-1: #f6f7f3;
+                --bg-2: #e7efe8;
+                --card: #ffffff;
+                --ink: #172027;
+                --muted: #5f6b72;
+                --accent: #0f766e;
+                --accent-2: #d97706;
+                --line: #d9e0e3;
+            }
+
+            .stApp {
+                background:
+                    radial-gradient(1200px 500px at -10% -15%, rgba(217, 119, 6, 0.16), transparent 55%),
+                    radial-gradient(1000px 450px at 105% -20%, rgba(15, 118, 110, 0.18), transparent 58%),
+                    linear-gradient(180deg, var(--bg-1), var(--bg-2));
+                color: var(--ink);
+                font-family: 'Manrope', sans-serif;
+            }
+
+            h1, h2, h3 {
+                font-family: 'Space Grotesk', sans-serif;
+                letter-spacing: -0.02em;
+            }
+
+            .hero {
+                border: 1px solid var(--line);
+                border-radius: 18px;
+                padding: 20px 24px;
+                background: linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.72));
+                box-shadow: 0 12px 30px rgba(23, 32, 39, 0.08);
+                margin-bottom: 14px;
+                animation: riseIn .45s ease-out;
+            }
+
+            .metric-card {
+                border: 1px solid var(--line);
+                border-radius: 14px;
+                padding: 10px 14px;
+                background: var(--card);
+                box-shadow: 0 8px 16px rgba(23, 32, 39, 0.06);
+                animation: riseIn .5s ease-out;
+            }
+
+            @keyframes riseIn {
+                from {
+                    opacity: 0;
+                    transform: translateY(8px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+
+            .stButton > button {
+                border-radius: 999px;
+                border: 1px solid transparent;
+                font-weight: 700;
+                background: linear-gradient(90deg, var(--accent), #0a5c58);
+                color: #ffffff;
+            }
+
+            .stTabs [data-baseweb="tab-list"] {
+                gap: 8px;
+            }
+
+            .stTabs [data-baseweb="tab"] {
+                border-radius: 999px;
+                border: 1px solid var(--line);
+                background: rgba(255, 255, 255, 0.75);
+            }
+
+            .stDataFrame, .stPlotlyChart {
+                animation: riseIn .55s ease-out;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def get_secret(name: str, default: str | None = None) -> str | None:
@@ -29,369 +113,315 @@ def require_login() -> None:
 
     if not expected_password:
         st.error(
-            "Missing APP_PASSWORD secret. Add APP_PASSWORD in Streamlit Cloud > Advanced settings > Secrets."
+            "Missing APP_PASSWORD. Add APP_USERNAME and APP_PASSWORD in Streamlit Cloud > App settings > Secrets."
         )
         st.stop()
 
-    if st.session_state.get("authenticated", False):
+    if st.session_state.get("authenticated"):
         return
 
-    st.title("CSVDash Login")
-    st.caption("Protected access for your school project deployment")
+    st.markdown("## Secure Access")
+    st.caption("Enter credentials to open the dashboard.")
 
-    with st.form("login_form"):
-        username = st.text_input("Username", value="admin")
-        password = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Login")
+    left, center, right = st.columns([1, 1.6, 1])
+    with center:
+        with st.form("login", clear_on_submit=False):
+            username = st.text_input("Username", value="admin")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Enter Dashboard")
 
-    if submitted:
-        user_ok = hmac.compare_digest(username.strip(), expected_username)
-        pass_ok = hmac.compare_digest(password, expected_password)
-        if user_ok and pass_ok:
-            st.session_state.authenticated = True
-            st.rerun()
-        st.error("Invalid username or password.")
+        if submitted:
+            user_ok = hmac.compare_digest(username.strip(), expected_username)
+            pass_ok = hmac.compare_digest(password, expected_password)
+            if user_ok and pass_ok:
+                st.session_state.authenticated = True
+                st.rerun()
+            st.error("Invalid credentials.")
 
     st.stop()
 
 
 @st.cache_data(show_spinner=False)
 def load_csv(uploaded_file) -> pd.DataFrame:
+    uploaded_file.seek(0)
     try:
         return pd.read_csv(uploaded_file, sep=None, engine="python")
     except Exception:
         uploaded_file.seek(0)
-        return pd.read_csv(uploaded_file)
+        return pd.read_csv(uploaded_file, encoding_errors="ignore")
 
 
-def find_column_name(user_text: str, columns: list[str]) -> str | None:
-    cleaned = user_text.strip().lower()
-
-    for col in columns:
-        if cleaned == col.lower():
-            return col
-
-    no_space = re.sub(r"[\s_]+", "", cleaned)
-    for col in columns:
-        if no_space == re.sub(r"[\s_]+", "", col.lower()):
-            return col
-
-    for col in columns:
-        if cleaned in col.lower():
-            return col
-
-    return None
-
-
-def run_sql_query(df: pd.DataFrame, query: str) -> pd.DataFrame:
-    connection = sqlite3.connect(":memory:")
-    try:
-        df.to_sql("dados", connection, if_exists="replace", index=False)
-        result = pd.read_sql_query(query, connection)
-        return result
-    finally:
-        connection.close()
-
-
-def parse_command(command: str, df: pd.DataFrame) -> dict:
-    text = command.strip()
-    low = text.lower()
-
-    if not text:
-        return {"type": "empty"}
-
-    if low.startswith("sql:"):
-        return {"type": "sql", "query": text.split(":", 1)[1].strip()}
-
-    if re.match(r"^\s*(select|with)\b", text, flags=re.IGNORECASE):
-        return {"type": "sql", "query": text}
-
-    if "estat" in low:
-        return {"type": "stats"}
-
-    top_match = re.search(r"top\s+(\d+)\s+(?:de\s+)?(.+)$", low)
-    if top_match:
-        n_value = int(top_match.group(1))
-        col_text = top_match.group(2).strip()
-        col_name = find_column_name(col_text, list(df.columns))
-        if col_name:
-            query = (
-                f'SELECT "{col_name}", COUNT(*) AS total '
-                f'FROM dados GROUP BY "{col_name}" ORDER BY total DESC LIMIT {n_value}'
-            )
-            return {"type": "sql", "query": query}
-
-    mean_match = re.search(r"(?:media|m[eé]dia)\s+(?:da|de)\s+(.+)$", low)
-    if mean_match:
-        col_text = mean_match.group(1).replace("coluna", "").strip()
-        col_name = find_column_name(col_text, list(df.columns))
-        if col_name:
-            query = f'SELECT AVG("{col_name}") AS media FROM dados'
-            return {"type": "sql", "query": query}
-
-    count_match = re.search(r"contagem\s+por\s+(.+)$", low)
-    if count_match:
-        col_text = count_match.group(1).strip()
-        col_name = find_column_name(col_text, list(df.columns))
-        if col_name:
-            query = (
-                f'SELECT "{col_name}", COUNT(*) AS total '
-                f'FROM dados GROUP BY "{col_name}" ORDER BY total DESC'
-            )
-            return {"type": "sql", "query": query}
-
-    scatter_match = re.search(
-        r"(?:grafico|gr[aá]fico)\s+de\s+dispers[aã]o\s+(.+?)\s+(?:vs|x|e)\s+(.+)$",
-        low,
+def render_hero(df: pd.DataFrame) -> None:
+    st.markdown(
+        """
+        <div class="hero">
+            <h1 style="margin:0;">CSVDash Visual Analytics</h1>
+            <p style="margin:8px 0 0 0;color:#5f6b72;">
+                Clean exploratory analysis workspace for large CSV files with heatmaps, relationships, and clustering.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    if scatter_match:
-        x_col_text = scatter_match.group(1).strip()
-        y_col_text = scatter_match.group(2).strip()
-        x_col = find_column_name(x_col_text, list(df.columns))
-        y_col = find_column_name(y_col_text, list(df.columns))
-        if x_col and y_col:
-            return {"type": "scatter", "x": x_col, "y": y_col}
 
-    return {"type": "unknown"}
-
-
-def render_dataset_overview(df: pd.DataFrame) -> None:
-    st.subheader("Dataset Overview")
-    col1, col2, col3 = st.columns(3)
+    missing = int(df.isna().sum().sum())
+    numeric_cols = len(df.select_dtypes(include="number").columns)
+    col1, col2, col3, col4 = st.columns(4)
+    col1.markdown('<div class="metric-card">', unsafe_allow_html=True)
     col1.metric("Rows", f"{df.shape[0]:,}")
+    col1.markdown("</div>", unsafe_allow_html=True)
+
+    col2.markdown('<div class="metric-card">', unsafe_allow_html=True)
     col2.metric("Columns", df.shape[1])
-    col3.metric("Missing Values", int(df.isna().sum().sum()))
+    col2.markdown("</div>", unsafe_allow_html=True)
 
-    with st.expander("Columns and data types", expanded=False):
-        info_df = pd.DataFrame(
-            {
-                "column": df.columns,
-                "dtype": [str(t) for t in df.dtypes],
-                "missing": [int(df[c].isna().sum()) for c in df.columns],
-                "unique": [int(df[c].nunique(dropna=True)) for c in df.columns],
-            }
-        )
-        st.dataframe(info_df, use_container_width=True)
+    col3.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    col3.metric("Numeric Features", numeric_cols)
+    col3.markdown("</div>", unsafe_allow_html=True)
 
-    st.dataframe(df.head(25), use_container_width=True)
+    col4.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    col4.metric("Missing Values", f"{missing:,}")
+    col4.markdown("</div>", unsafe_allow_html=True)
 
 
-def render_statistics(df: pd.DataFrame) -> None:
-    st.subheader("Statistics")
-    numeric_columns = list(df.select_dtypes(include="number").columns)
-
-    if not numeric_columns:
-        st.warning("No numeric columns detected for statistical analysis.")
-        return
-
-    selected = st.multiselect(
-        "Choose numeric columns",
-        numeric_columns,
-        default=numeric_columns[: min(6, len(numeric_columns))],
+def render_data_tab(df: pd.DataFrame) -> None:
+    st.subheader("Data Overview")
+    info = pd.DataFrame(
+        {
+            "column": df.columns,
+            "dtype": [str(dtype) for dtype in df.dtypes],
+            "missing": [int(df[col].isna().sum()) for col in df.columns],
+            "unique": [int(df[col].nunique(dropna=True)) for col in df.columns],
+        }
     )
-    if not selected:
-        st.info("Select at least one numeric column.")
+
+    left, right = st.columns([1, 1.3])
+    with left:
+        st.markdown("##### Column Profile")
+        st.dataframe(info, use_container_width=True, hide_index=True)
+    with right:
+        st.markdown("##### Data Preview")
+        sample_size = st.slider("Preview rows", 10, 100, 25)
+        st.dataframe(df.head(sample_size), use_container_width=True)
+
+    numeric = list(df.select_dtypes(include="number").columns)
+    if numeric:
+        st.markdown("##### Summary Statistics")
+        stats_cols = st.multiselect(
+            "Select numeric columns",
+            options=numeric,
+            default=numeric[: min(6, len(numeric))],
+        )
+        if stats_cols:
+            st.dataframe(df[stats_cols].describe().T, use_container_width=True)
+
+
+def render_distribution_tab(df: pd.DataFrame, numeric: list[str]) -> None:
+    st.subheader("Distribution Lab")
+    if not numeric:
+        st.warning("No numeric columns available for distribution charts.")
         return
 
-    stats_df = df[selected].describe().T
-    st.dataframe(stats_df, use_container_width=True)
-
-
-def render_visualizations(df: pd.DataFrame) -> None:
-    st.subheader("Visualizations")
-    all_columns = list(df.columns)
-    numeric_columns = list(df.select_dtypes(include="number").columns)
-
-    if not numeric_columns:
-        st.warning("No numeric columns found for charts.")
-        return
-
-    chart_col_1, chart_col_2 = st.columns(2)
-
-    with chart_col_1:
-        hist_col = st.selectbox("Histogram column", numeric_columns, key="hist_col")
-        bins = st.slider("Histogram bins", 10, 120, 35, key="hist_bins")
-        fig_hist = px.histogram(df, x=hist_col, nbins=bins, title=f"Histogram - {hist_col}")
+    col1, col2 = st.columns(2)
+    with col1:
+        hist_col = st.selectbox("Histogram feature", numeric)
+        bins = st.slider("Number of bins", 8, 120, 36)
+        fig_hist = px.histogram(
+            df,
+            x=hist_col,
+            nbins=bins,
+            color_discrete_sequence=["#0f766e"],
+            title=f"Distribution: {hist_col}",
+        )
+        fig_hist.update_layout(margin=dict(l=10, r=10, t=48, b=10))
         st.plotly_chart(fig_hist, use_container_width=True)
 
-    with chart_col_2:
-        box_col = st.selectbox("Box plot column", numeric_columns, key="box_col")
-        fig_box = px.box(df, y=box_col, title=f"Box plot - {box_col}")
+    with col2:
+        box_col = st.selectbox("Box plot feature", numeric, index=min(1, len(numeric) - 1))
+        fig_box = px.box(
+            df,
+            y=box_col,
+            points="outliers",
+            color_discrete_sequence=["#d97706"],
+            title=f"Outliers: {box_col}",
+        )
+        fig_box.update_layout(margin=dict(l=10, r=10, t=48, b=10))
         st.plotly_chart(fig_box, use_container_width=True)
 
-    if len(numeric_columns) >= 2:
-        st.markdown("#### Correlation Heatmap")
-        corr = df[numeric_columns].corr(numeric_only=True)
-        fig_heatmap = px.imshow(
-            corr,
-            text_auto=".2f",
-            color_continuous_scale="RdBu",
-            origin="lower",
-            title="Numeric Correlation Matrix",
+
+def render_relationship_tab(df: pd.DataFrame, numeric: list[str]) -> None:
+    st.subheader("Heatmaps And Relationships")
+    if len(numeric) < 2:
+        st.warning("At least two numeric columns are needed for correlations and relationships.")
+        return
+
+    method = st.radio("Correlation method", ["pearson", "spearman"], horizontal=True)
+    corr = df[numeric].corr(method=method, numeric_only=True)
+
+    fig_heatmap = px.imshow(
+        corr,
+        text_auto=".2f",
+        color_continuous_scale="RdBu_r",
+        zmin=-1,
+        zmax=1,
+        title=f"Correlation Heatmap ({method.title()})",
+    )
+    fig_heatmap.update_layout(margin=dict(l=10, r=10, t=52, b=10), height=560)
+    st.plotly_chart(fig_heatmap, use_container_width=True)
+
+    st.markdown("##### Scatter Exploration")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        x_axis = st.selectbox("X axis", numeric, key="scatter_x")
+    with col2:
+        y_axis = st.selectbox("Y axis", numeric, index=min(1, len(numeric) - 1), key="scatter_y")
+    with col3:
+        color_options = ["None"] + list(df.columns)
+        color_by = st.selectbox("Color by", color_options)
+
+    if color_by == "None":
+        fig_scatter = px.scatter(
+            df,
+            x=x_axis,
+            y=y_axis,
+            opacity=0.75,
+            color_discrete_sequence=["#0f766e"],
+            title=f"Scatter: {x_axis} vs {y_axis}",
         )
-        st.plotly_chart(fig_heatmap, use_container_width=True)
+    else:
+        fig_scatter = px.scatter(
+            df,
+            x=x_axis,
+            y=y_axis,
+            color=color_by,
+            opacity=0.8,
+            title=f"Scatter: {x_axis} vs {y_axis}",
+        )
+    fig_scatter.update_layout(margin=dict(l=10, r=10, t=52, b=10))
+    st.plotly_chart(fig_scatter, use_container_width=True)
 
-        st.markdown("#### Scatter Plot")
-        sc1, sc2, sc3 = st.columns(3)
-        with sc1:
-            x_col = st.selectbox("X axis", numeric_columns, key="scatter_x")
-        with sc2:
-            y_col = st.selectbox("Y axis", numeric_columns, index=min(1, len(numeric_columns) - 1), key="scatter_y")
-        with sc3:
-            color_col = st.selectbox("Color by", ["(none)"] + all_columns, key="scatter_color")
 
-        if color_col == "(none)":
-            fig_scatter = px.scatter(df, x=x_col, y=y_col, title=f"Scatter - {x_col} vs {y_col}")
-        else:
-            fig_scatter = px.scatter(
-                df,
-                x=x_col,
-                y=y_col,
-                color=color_col,
-                title=f"Scatter - {x_col} vs {y_col}",
-            )
-        st.plotly_chart(fig_scatter, use_container_width=True)
+def render_clustering_tab(df: pd.DataFrame, numeric: list[str]) -> None:
+    st.subheader("Clustering Studio")
+    if len(numeric) < 2:
+        st.warning("At least two numeric columns are needed for clustering.")
+        return
 
-    st.markdown("#### K-Means Clustering")
-    cluster_columns = st.multiselect(
-        "Select numeric columns for clustering",
-        numeric_columns,
-        default=numeric_columns[: min(3, len(numeric_columns))],
-        key="cluster_cols",
+    features = st.multiselect(
+        "Select clustering features",
+        options=numeric,
+        default=numeric[: min(4, len(numeric))],
     )
-
-    if len(cluster_columns) < 2:
-        st.info("Select at least 2 numeric columns for clustering.")
+    if len(features) < 2:
+        st.info("Select at least 2 features.")
         return
 
-    valid_cluster_df = df[cluster_columns].dropna()
-    if valid_cluster_df.empty:
-        st.warning("No rows left after dropping missing values in selected cluster columns.")
+    cluster_df = df[features].dropna()
+    if len(cluster_df) < 3:
+        st.warning("Not enough valid rows after removing missing values.")
         return
 
-    max_k = min(10, len(valid_cluster_df))
+    max_k = min(10, len(cluster_df) - 1)
     if max_k < 2:
-        st.warning("Not enough rows for clustering.")
+        st.warning("Not enough observations to estimate clusters.")
         return
 
-    k_value = st.slider("Number of clusters (k)", 2, max_k, min(4, max_k), key="k_value")
-    scaler = StandardScaler()
-    scaled = scaler.fit_transform(valid_cluster_df)
+    k = st.slider("Number of clusters (k)", min_value=2, max_value=max_k, value=min(4, max_k))
+    scale_data = st.checkbox("Standardize features", value=True)
 
-    model = KMeans(n_clusters=k_value, random_state=42, n_init="auto")
-    labels = model.fit_predict(scaled)
+    model_input = cluster_df.copy()
+    if scale_data:
+        model_input = pd.DataFrame(
+            StandardScaler().fit_transform(model_input),
+            columns=cluster_df.columns,
+            index=cluster_df.index,
+        )
 
-    plot_df = valid_cluster_df.copy()
-    plot_df["cluster"] = labels.astype(str)
+    model = KMeans(n_clusters=k, n_init="auto", random_state=42)
+    labels = model.fit_predict(model_input)
 
-    x_cluster = st.selectbox("Cluster X axis", cluster_columns, key="cluster_x")
-    y_cluster = st.selectbox(
-        "Cluster Y axis",
-        cluster_columns,
-        index=min(1, len(cluster_columns) - 1),
-        key="cluster_y",
-    )
+    labelled = cluster_df.copy()
+    labelled["cluster"] = labels.astype(str)
 
-    fig_cluster = px.scatter(
-        plot_df,
-        x=x_cluster,
-        y=y_cluster,
+    quality_left, quality_right = st.columns(2)
+    quality_left.metric("Inertia", f"{model.inertia_:,.2f}")
+    sil_score = silhouette_score(model_input, labels)
+    quality_right.metric("Silhouette", f"{sil_score:.3f}")
+
+    if len(features) == 2:
+        plot_frame = labelled.rename(columns={features[0]: "dim1", features[1]: "dim2"})
+        x_title = features[0]
+        y_title = features[1]
+    else:
+        pca = PCA(n_components=2, random_state=42)
+        reduced = pca.fit_transform(model_input)
+        plot_frame = pd.DataFrame(reduced, columns=["dim1", "dim2"], index=model_input.index)
+        plot_frame["cluster"] = labels.astype(str)
+        explained = pca.explained_variance_ratio_.sum() * 100
+        st.caption(f"PCA projection used for visualization ({explained:.1f}% variance explained).")
+        x_title = "Component 1"
+        y_title = "Component 2"
+
+    fig_clusters = px.scatter(
+        plot_frame,
+        x="dim1",
+        y="dim2",
         color="cluster",
         title="K-Means Cluster Projection",
+        color_discrete_sequence=px.colors.qualitative.Bold,
     )
-    st.plotly_chart(fig_cluster, use_container_width=True)
-
-
-def render_chatbot_sql(df: pd.DataFrame) -> None:
-    st.subheader("Chatbot Commands (PT/EN) + SQL")
-    st.write("Use plain commands or direct SQL.")
-    st.code(
-        "\n".join(
-            [
-                "mostre as estatisticas",
-                "media da coluna score",
-                "contagem por genero",
-                "grafico de dispersao idade vs salario",
-                "sql: SELECT * FROM dados LIMIT 20",
-            ]
-        ),
-        language="text",
+    fig_clusters.update_layout(
+        xaxis_title=x_title,
+        yaxis_title=y_title,
+        margin=dict(l=10, r=10, t=52, b=10),
     )
+    st.plotly_chart(fig_clusters, use_container_width=True)
 
-    command = st.text_input("Command")
-    run = st.button("Run command")
-
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-
-    if run:
-        action = parse_command(command, df)
-        st.session_state.chat_history.append({"command": command, "action": action})
-
-        if action["type"] == "empty":
-            st.info("Write a command first.")
-
-        elif action["type"] == "stats":
-            st.dataframe(df.describe(include="all").transpose(), use_container_width=True)
-
-        elif action["type"] == "sql":
-            try:
-                result = run_sql_query(df, action["query"])
-                st.success("SQL executed successfully.")
-                st.dataframe(result, use_container_width=True)
-            except Exception as exc:
-                st.error(f"SQL error: {exc}")
-
-        elif action["type"] == "scatter":
-            fig = px.scatter(df, x=action["x"], y=action["y"], title="Command Scatter")
-            st.plotly_chart(fig, use_container_width=True)
-
-        else:
-            st.warning("Unknown command. Try one of the examples shown above.")
-
-    if st.session_state.chat_history:
-        with st.expander("Command history", expanded=False):
-            for i, item in enumerate(reversed(st.session_state.chat_history), start=1):
-                st.write(f"{i}. {item['command']}")
+    st.markdown("##### Cluster Profiles")
+    profile = labelled.groupby("cluster")[features].mean().round(3)
+    st.dataframe(profile, use_container_width=True)
 
 
 def main() -> None:
+    inject_styles()
     require_login()
 
     st.sidebar.title("CSVDash")
-    st.sidebar.write("Authenticated")
-
+    st.sidebar.caption("Protected analytics workspace")
     if st.sidebar.button("Logout"):
         st.session_state.authenticated = False
         st.rerun()
 
-    st.title("CSV Analytics + Command Chatbot")
-    st.caption("Upload a CSV and run exploratory analysis, charts, clusters, and SQL commands.")
-
-    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+    uploaded_file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
     if uploaded_file is None:
-        st.info("Upload a CSV file to start.")
+        st.markdown("### Upload a CSV to begin")
+        st.info("Use the file uploader in the sidebar. All analysis updates automatically after upload.")
         return
 
     try:
         df = load_csv(uploaded_file)
     except Exception as exc:
-        st.error(f"Could not read CSV: {exc}")
+        st.error(f"Failed to parse CSV: {exc}")
         return
 
-    tabs = st.tabs(["Overview", "Statistics", "Visualizations", "Chatbot SQL"])
+    if df.empty:
+        st.warning("The uploaded file has no rows.")
+        return
 
-    with tabs[0]:
-        render_dataset_overview(df)
+    render_hero(df)
+    numeric = list(df.select_dtypes(include="number").columns)
 
-    with tabs[1]:
-        render_statistics(df)
-
-    with tabs[2]:
-        render_visualizations(df)
-
-    with tabs[3]:
-        render_chatbot_sql(df)
+    tab_data, tab_dist, tab_rels, tab_cluster = st.tabs(
+        ["Data", "Distribution", "Heatmaps", "Clustering"]
+    )
+    with tab_data:
+        render_data_tab(df)
+    with tab_dist:
+        render_distribution_tab(df, numeric)
+    with tab_rels:
+        render_relationship_tab(df, numeric)
+    with tab_cluster:
+        render_clustering_tab(df, numeric)
 
 
 if __name__ == "__main__":

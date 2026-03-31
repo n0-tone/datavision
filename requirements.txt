@@ -1,12 +1,5 @@
-streamlit
-streamlit-aggrid
-numpy
-matplotlib
-pandasai
-streamlit-elements
-streamlit-option-menu
-streamlit-pandas-profiling
-plotly
-pymongo
-tk
-scikit-learn
+streamlit==1.55.0
+pandas==2.2.3
+numpy==2.2.6
+plotly==6.0.1
+scikit-learn==1.8.0
