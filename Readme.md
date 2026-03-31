@@ -1,67 +1,98 @@
+# DataVision
 
+DataVision is a password-protected Streamlit analytics app for CSV exploration, data quality auditing, and machine learning visual analysis.
 
-# Streamlit CSV Analytics App
+## What It Includes
 
-This Streamlit app is designed to help you analyze and visualize data from CSV files. It allows you to upload your own CSV data and generate various analytics, including mean, mode, standard deviation, and variance for selected columns.
+- Secure login using Streamlit Secrets.
+- Dark JetBrains Mono design system.
+- Dataset overview with live filtering.
+- Advanced statistics (mean, median, std, skewness, kurtosis, IQR, outlier counts).
+- Data quality checks (missing values, duplicate rows, datatype profile, missing heatmap).
+- Relationship analysis (correlation heatmap, top correlated pairs, scatter matrix).
+- Clustering (K-Means, elbow curve, silhouette score, cluster profiles, PCA projection).
+- PCA analysis (explained variance and projections).
+- Feature importance with Random Forest (classification/regression).
+- Time series analysis (date parsing, resampling, rolling trend).
+- Auto insights summary.
 
-![csvdah](https://github.com/Otherwa/CSVDash/assets/67428572/eabb8f5d-d27e-49c8-91c2-03ffa992412e)
+## Project Structure
 
-## Features
+- `streamlit.py`: primary Streamlit entrypoint.
+- `main.py`: secondary entrypoint that runs the same modular app.
+- `src/dashboard/`: modular app logic.
+- `src/components/sidebar.py`: shared sidebar rendering.
+- `data/`: sample datasets.
 
-- Upload your CSV data.
-- Select the columns you want to analyze.
-- Calculate and display mean, mode, standard deviation, and variance for the selected columns.
-- Visualize your data with interactive charts (you can add this feature if desired).
+## Local Run
 
-## Usage
+1. Install dependencies.
 
-1. **Upload Your CSV File**
-   - Click the "Choose a CSV file" button to upload your CSV data.
+```bash
+pip install -r requirements.txt
+```
 
-2. **Select Columns for Analysis**
-   - After uploading the file, use the multiselect dropdown to select the columns you want to analyze.
+2. Set credentials as environment variables.
 
-3. **Calculate Statistics**
-   - Click the "Calculate Statistics" button to generate analytics for the selected columns.
+PowerShell:
 
-4. **View Results**
-   - The calculated statistics will be displayed for each selected column.
+```powershell
+$env:APP_USERNAME = "admin"
+$env:APP_PASSWORD = "change-me"
+```
 
-## Getting Started
+CMD:
 
-1. Clone this repository to your local machine.
+```bat
+set APP_USERNAME=admin
+set APP_PASSWORD=change-me
+```
 
-   ```bash
-   git clone https://github.com/your-username/streamlit-csv-analytics.git
-   ```
+3. Start the app.
 
-2. Install the required Python packages.
+```bash
+streamlit run streamlit.py
+```
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+## TOML Snippets
 
-3. Run the Streamlit app.
+Use these snippets where needed (for example Streamlit Cloud settings, or your own local secret file if you choose to create one).
 
-   ```bash
-   streamlit run app.py
-   ```
+Secrets TOML:
 
-4. Access the app in your web browser.
+```toml
+APP_USERNAME = "admin"
+APP_PASSWORD = "change-me"
+```
 
-   ```
-   http://localhost:8501
-   ```
+Theme TOML:
 
-## Dependencies
+```toml
+[theme]
+base = "dark"
+primaryColor = "#39e0c0"
+backgroundColor = "#05070c"
+secondaryBackgroundColor = "#0f1726"
+textColor = "#e6edf8"
+font = "monospace"
 
-- Streamlit: [Streamlit Documentation](https://docs.streamlit.io/)
-- Pandas: [Pandas Documentation](https://pandas.pydata.org/pandas-docs/stable/index.html)
+[browser]
+gatherUsageStats = false
+```
 
-## License
+## Streamlit Cloud Deploy
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+1. Set Python to 3.11.
+2. Set entrypoint to `streamlit.py`.
+3. In Streamlit Cloud Secrets, paste:
 
-## Acknowledgments
+```toml
+APP_USERNAME = "admin"
+APP_PASSWORD = "your-strong-password"
+```
 
-- [Streamlit](https://streamlit.io/) for making it easy to create data apps with Python.
+## Notes
+
+- This repo no longer stores a `.streamlit/` folder.
+- Authentication reads Streamlit Secrets first, then falls back to environment variables.
+- Theme styling is implemented in `src/dashboard/theme.css` and can be complemented by TOML theme values in your deploy environment.
