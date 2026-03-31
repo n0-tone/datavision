@@ -24,10 +24,21 @@ footer {
   display: none !important;
 }
 header {
-  visibility: hidden !important;
+  visibility: visible !important;
 }
 
-[data-testid="collapsedControl"] {
+[data-testid="stHeader"] {
+  background: transparent !important;
+}
+
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"] {
+  display: none !important;
+}
+
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"] {
   visibility: visible !important;
   position: fixed;
   top: 0.85rem;
@@ -35,7 +46,9 @@ header {
   z-index: 1002;
 }
 
-[data-testid="collapsedControl"] button {
+[data-testid="collapsedControl"] button,
+[data-testid="stSidebarCollapsedControl"] button,
+button[aria-label="Open sidebar"] {
   border-radius: 999px;
   min-height: 2rem;
   min-width: 2rem;
@@ -50,7 +63,9 @@ header {
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
 }
 
-[data-testid="collapsedControl"] button:hover {
+[data-testid="collapsedControl"] button:hover,
+[data-testid="stSidebarCollapsedControl"] button:hover,
+button[aria-label="Open sidebar"]:hover {
   border-color: rgba(57, 224, 192, 0.65);
   box-shadow: 0 10px 20px rgba(0, 0, 0, 0.34);
 }
@@ -229,7 +244,8 @@ h4 {
 }
 
 @media (max-width: 1024px) {
-  [data-testid="collapsedControl"] {
+  [data-testid="collapsedControl"],
+  [data-testid="stSidebarCollapsedControl"] {
     top: 0.65rem;
     left: 0.6rem;
   }
@@ -300,6 +316,63 @@ h4 {
 .stButton > button:hover,
 .stFormSubmitButton > button:hover {
   transform: translateY(-1px);
+}
+
+.st-key-section_nav [data-testid="stRadio"] > div {
+  margin-top: 0.55rem;
+  margin-bottom: 0.95rem;
+}
+
+.st-key-section_nav [role="radiogroup"] {
+  display: flex;
+  flex-wrap: nowrap;
+  column-gap: 0.45rem;
+  row-gap: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.35rem;
+  scrollbar-width: thin;
+  scrollbar-color: #2a3f5f rgba(12, 20, 33, 0.55);
+}
+
+.st-key-section_nav [role="radiogroup"]::-webkit-scrollbar {
+  height: 8px;
+}
+
+.st-key-section_nav [role="radiogroup"]::-webkit-scrollbar-track {
+  background: rgba(12, 20, 33, 0.55);
+  border-radius: 999px;
+}
+
+.st-key-section_nav [role="radiogroup"]::-webkit-scrollbar-thumb {
+  background: #2a3f5f;
+  border-radius: 999px;
+}
+
+.st-key-section_nav label {
+  border-radius: 999px;
+  border: 1px solid var(--line) !important;
+  background: rgba(15, 23, 38, 0.76);
+  color: var(--ink) !important;
+  font-weight: 600;
+  min-height: 2.25rem;
+  padding: 0.38rem 0.85rem;
+  white-space: nowrap;
+  line-height: 1.15;
+  transition: all 150ms ease;
+}
+
+.st-key-section_nav label:has(input:checked) {
+  border-color: rgba(57, 224, 192, 0.95) !important;
+  box-shadow: 0 0 0 1px rgba(57, 224, 192, 0.35);
+  background: rgba(18, 34, 53, 0.92);
+}
+
+.tab-loading-note {
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin: 0.3rem 0 0.55rem;
 }
 
 .stTabs [data-baseweb="tab-list"] {

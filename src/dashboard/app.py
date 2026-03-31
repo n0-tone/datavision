@@ -63,49 +63,49 @@ def run_app() -> None:
 
     render_hero(filtered_df)
 
-    (
-        tab_overview,
-        tab_stats,
-        tab_quality,
-        tab_relationships,
-        tab_clustering,
-        tab_pca,
-        tab_importance,
-        tab_supervised,
-        tab_time,
-        tab_insights,
-    ) = st.tabs(
-        [
-            "Overview",
-            "Advanced Stats",
-            "Data Quality",
-            "Relationships",
-            "Clustering",
-            "PCA",
-            "Feature Importance",
-            "Linear/Logistic/Tree/RF",
-            "Time Series",
-            "Auto Insights",
-        ]
+    sections = [
+        "Overview",
+        "Advanced Stats",
+        "Data Quality",
+        "Relationships",
+        "Clustering",
+        "PCA",
+        "Feature Importance",
+        "Supervised Models",
+        "Time Series",
+        "Auto Insights",
+    ]
+
+    active_section = st.radio(
+        "Section",
+        options=sections,
+        horizontal=True,
+        key="section_nav",
+        label_visibility="collapsed",
     )
 
-    with tab_overview:
-        render_overview_tab(filtered_df, numeric, categorical)
-    with tab_stats:
-        render_advanced_stats_tab(filtered_df, numeric)
-    with tab_quality:
-        render_quality_tab(filtered_df)
-    with tab_relationships:
-        render_relationships_tab(filtered_df, numeric)
-    with tab_clustering:
-        render_clustering_tab(filtered_df, numeric)
-    with tab_pca:
-        render_pca_tab(filtered_df, numeric)
-    with tab_importance:
-        render_feature_importance_tab(filtered_df)
-    with tab_supervised:
-        render_supervised_models_tab(filtered_df)
-    with tab_time:
-        render_time_series_tab(filtered_df, numeric)
-    with tab_insights:
-        render_insights_tab(filtered_df, numeric)
+    render_map = {
+        "Overview": lambda: render_overview_tab(filtered_df, numeric, categorical),
+        "Advanced Stats": lambda: render_advanced_stats_tab(filtered_df, numeric),
+        "Data Quality": lambda: render_quality_tab(filtered_df),
+        "Relationships": lambda: render_relationships_tab(filtered_df, numeric),
+        "Clustering": lambda: render_clustering_tab(filtered_df, numeric),
+        "PCA": lambda: render_pca_tab(filtered_df, numeric),
+        "Feature Importance": lambda: render_feature_importance_tab(filtered_df),
+        "Supervised Models": lambda: render_supervised_models_tab(filtered_df),
+        "Time Series": lambda: render_time_series_tab(filtered_df, numeric),
+        "Auto Insights": lambda: render_insights_tab(filtered_df, numeric),
+    }
+
+    heavy_sections = {"Clustering", "PCA", "Feature Importance", "Supervised Models"}
+    if active_section in heavy_sections:
+        loading_note = st.empty()
+        loading_note.markdown(
+            f"<div class='tab-loading-note'>Loading {active_section} analysis...</div>",
+            unsafe_allow_html=True,
+        )
+        with st.spinner(f"Running {active_section}..."):
+            render_map[active_section]()
+        loading_note.empty()
+    else:
+        render_map[active_section]()
