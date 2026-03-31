@@ -10,7 +10,7 @@ from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
 
 
-st.set_page_config(page_title="CSVDash", page_icon="📊", layout="wide")
+st.set_page_config(page_title="CSVDash", page_icon=":bar_chart:", layout="wide")
 
 
 def inject_styles() -> None:
