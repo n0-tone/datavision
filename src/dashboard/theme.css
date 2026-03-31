@@ -396,3 +396,10 @@ div[data-baseweb="input"] > div,
 footer {
     visibility: hidden;
 }
+
+/* footer - multiple selectors for resilience */
+[class*="_container_1upux"] { display: none !important; }
+[class*="_hostedName_"] { display: none !important; }
+[class*="_linkOutText_"] { display: none !important; }
+footer { visibility: hidden !important; display: none !important; }
+[data-testid="stBottom"] { display: none !important; }
