@@ -16,6 +16,10 @@
     --danger: #f16d86;
 }
 
+#MainMenu { visibility: hidden !important; }
+footer { visibility: hidden !important; display: none !important; }
+header { visibility: hidden !important; }
+
 body,
 .stApp {
     color: var(--ink);
