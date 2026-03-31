@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0');
 
 :root {
     --bg-0: #05070c;
@@ -184,6 +185,7 @@ h1, h2, h3, h4 {
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    margin-bottom: 0.35rem;
 }
 
 .metric-label {
@@ -219,12 +221,30 @@ h1, h2, h3, h4 {
 
 .stTabs [data-baseweb="tab-list"] {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     column-gap: 0.45rem;
-    row-gap: 0.45rem;
-    margin-top: 0.2rem;
-    margin-bottom: 0.65rem;
-    padding-bottom: 0.15rem;
+    row-gap: 0;
+    margin-top: 0.55rem;
+    margin-bottom: 0.95rem;
+    padding-bottom: 0.35rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: #2a3f5f rgba(12, 20, 33, 0.55);
+}
+
+.stTabs [data-baseweb="tab-list"]::-webkit-scrollbar {
+    height: 8px;
+}
+
+.stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-track {
+    background: rgba(12, 20, 33, 0.55);
+    border-radius: 999px;
+}
+
+.stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-thumb {
+    background: #2a3f5f;
+    border-radius: 999px;
 }
 
 .stTabs [data-baseweb="tab"] {
@@ -235,11 +255,12 @@ h1, h2, h3, h4 {
     font-weight: 600;
     min-height: 2.25rem;
     padding: 0.38rem 0.85rem;
-    white-space: normal;
+    white-space: nowrap;
     line-height: 1.15;
     text-align: center;
     transition: all 150ms ease;
     overflow: hidden;
+    flex: 0 0 auto;
 }
 
 .stTabs [data-baseweb="tab"] > div {
@@ -251,6 +272,21 @@ h1, h2, h3, h4 {
     border-color: rgba(57, 224, 192, 0.95) !important;
     box-shadow: 0 0 0 1px rgba(57, 224, 192, 0.35);
     background: rgba(18, 34, 53, 0.92);
+}
+
+.stTabs [data-baseweb="tab-highlight"] {
+    height: 2px !important;
+    background: linear-gradient(90deg, var(--accent), var(--accent-soft)) !important;
+    border-radius: 999px;
+}
+
+.stTabs [data-baseweb="tab-border"] {
+    background: rgba(34, 49, 73, 0.75) !important;
+}
+
+.stTabs [data-baseweb="tab-panel"] {
+    padding-top: 0.2rem;
+    padding-bottom: 0.6rem;
 }
 
 .stTextInput input,

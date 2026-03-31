@@ -540,20 +540,44 @@ def render_feature_importance_tab(df: pd.DataFrame) -> None:
     mode = st.selectbox("Task type", ["Auto", "Classification", "Regression"], key="fi_mode")
     model_rows = st.slider("Max rows for training", 500, 30000, 8000, 500, key="fi_rows")
 
-    work = df[features + [target]].dropna()
-    if len(work) < 30:
-        st.warning("Not enough rows after removing missing values.")
+    missing_strategy = st.selectbox(
+        "Missing value handling",
+        options=["Median/Mode imputation", "Drop rows with missing values"],
+        key="fi_missing_strategy",
+    )
+
+    x_data = df[features].copy()
+    y_raw = df[target].copy()
+
+    if missing_strategy == "Drop rows with missing values":
+        valid_mask = x_data.notna().all(axis=1) & y_raw.notna()
+        x_data = x_data.loc[valid_mask]
+        y_raw = y_raw.loc[valid_mask]
+    else:
+        for col in x_data.columns:
+            if pd.api.types.is_numeric_dtype(x_data[col]):
+                numeric_col = pd.to_numeric(x_data[col], errors="coerce")
+                median_value = numeric_col.median()
+                x_data[col] = numeric_col.fillna(median_value if pd.notna(median_value) else 0.0)
+            else:
+                mode_values = x_data[col].mode(dropna=True)
+                fill_value = mode_values.iloc[0] if not mode_values.empty else "<missing>"
+                x_data[col] = x_data[col].astype(str).replace("nan", np.nan).fillna(fill_value)
+
+    if len(x_data) < 30:
+        st.warning("Not enough valid rows for feature importance modeling.")
         return
 
-    if len(work) > model_rows:
-        work = work.sample(model_rows, random_state=42)
+    if len(x_data) > model_rows:
+        sampled_idx = x_data.sample(model_rows, random_state=42).index
+        x_data = x_data.loc[sampled_idx]
+        y_raw = y_raw.loc[sampled_idx]
 
-    x_train = pd.get_dummies(work[features], drop_first=True)
+    x_train = pd.get_dummies(x_data, drop_first=True)
     if x_train.empty:
         st.warning("Feature encoding produced an empty matrix.")
         return
 
-    y_raw = work[target]
     resolved_mode = mode
     if mode == "Auto":
         if pd.api.types.is_numeric_dtype(y_raw) and y_raw.nunique(dropna=True) > 20:
@@ -572,7 +596,7 @@ def render_feature_importance_tab(df: pd.DataFrame) -> None:
         model = RandomForestRegressor(n_estimators=240, random_state=42, n_jobs=-1)
         model.fit(x_fit, y_fit)
     else:
-        y_fit, classes = pd.factorize(y_raw.astype(str))
+        y_fit, classes = pd.factorize(y_raw.fillna("<missing>").astype(str))
         if len(np.unique(y_fit)) < 2:
             st.warning("Classification target needs at least two classes.")
             return
@@ -606,8 +630,18 @@ def render_time_series_tab(df: pd.DataFrame, numeric: list[str]) -> None:
     candidates = detect_datetime_candidates(df)
 
     if not candidates:
-        st.info("No likely datetime columns detected.")
-        return
+        fallback_candidates = [
+            c
+            for c in df.columns
+            if pd.api.types.is_datetime64_any_dtype(df[c])
+            or pd.api.types.is_object_dtype(df[c])
+            or pd.api.types.is_string_dtype(df[c])
+        ]
+        if not fallback_candidates:
+            st.info("No likely datetime columns detected.")
+            return
+        st.info("No likely datetime columns detected automatically. Pick a column to try parsing.")
+        candidates = fallback_candidates
 
     if not numeric:
         st.info("No numeric columns available for time series values.")
