@@ -2,6 +2,8 @@
 
 DataVision is a password-protected Streamlit analytics app for CSV exploration, data quality auditing, and machine learning visual analysis.
 
+Takes inspiration from this [repository](https://github.com/Otherwa/CSVDash).
+
 ## What It Includes
 
 - Secure login using Streamlit Secrets.
