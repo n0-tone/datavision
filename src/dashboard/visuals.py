@@ -15,9 +15,15 @@ from .data_ops import build_auto_insights, build_outlier_table, detect_datetime_
 
 
 def card_metric(container, label: str, value: str) -> None:
-    container.markdown('<div class="metric-shell">', unsafe_allow_html=True)
-    container.metric(label, value)
-    container.markdown("</div>", unsafe_allow_html=True)
+    container.markdown(
+        f"""
+        <div class="metric-shell">
+            <div class="metric-label">{label}</div>
+            <div class="metric-value">{value}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_hero(df: pd.DataFrame) -> None:
@@ -315,9 +321,30 @@ def render_clustering_tab(df: pd.DataFrame, numeric: list[str]) -> None:
         st.info("Select at least two features.")
         return
 
-    cluster_df = df[features].dropna()
+    missing_strategy = st.selectbox(
+        "Missing value handling",
+        options=["Median imputation", "Drop rows with missing values"],
+        key="cluster_missing_strategy",
+    )
+
+    raw_matrix = df[features].apply(pd.to_numeric, errors="coerce")
+    usable_features = [col for col in raw_matrix.columns if raw_matrix[col].notna().any()]
+    if len(usable_features) < 2:
+        st.warning("Selected features do not contain enough numeric data.")
+        return
+    if len(usable_features) != len(features):
+        skipped = sorted(set(features) - set(usable_features))
+        st.caption(f"Ignored empty/all-missing features: {', '.join(skipped)}")
+
+    raw_matrix = raw_matrix[usable_features]
+    if missing_strategy == "Drop rows with missing values":
+        cluster_df = raw_matrix.dropna()
+    else:
+        medians = raw_matrix.median()
+        cluster_df = raw_matrix.fillna(medians).fillna(0.0)
+
     if len(cluster_df) < 6:
-        st.warning("Not enough valid rows after dropping missing values.")
+        st.warning("Not enough valid rows after applying missing-value handling.")
         return
 
     max_k = min(12, len(cluster_df) - 1)
@@ -378,7 +405,7 @@ def render_clustering_tab(df: pd.DataFrame, numeric: list[str]) -> None:
     fig.update_layout(margin=dict(l=10, r=10, t=45, b=10), xaxis_title="PC1", yaxis_title="PC2")
     st.plotly_chart(fig, width="stretch")
 
-    profile = cluster_df.assign(cluster=labels).groupby("cluster")[features].mean().round(3)
+    profile = cluster_df.assign(cluster=labels).groupby("cluster")[usable_features].mean().round(3)
     st.markdown("##### Cluster Profiles")
     st.dataframe(profile, width="stretch")
 
@@ -399,15 +426,36 @@ def render_pca_tab(df: pd.DataFrame, numeric: list[str]) -> None:
         st.info("Select at least two numeric features.")
         return
 
-    clean = df[features].dropna()
+    missing_strategy = st.selectbox(
+        "Missing value handling",
+        options=["Median imputation", "Drop rows with missing values"],
+        key="pca_missing_strategy",
+    )
+
+    raw_matrix = df[features].apply(pd.to_numeric, errors="coerce")
+    usable_features = [col for col in raw_matrix.columns if raw_matrix[col].notna().any()]
+    if len(usable_features) < 2:
+        st.warning("Selected features do not contain enough numeric data.")
+        return
+    if len(usable_features) != len(features):
+        skipped = sorted(set(features) - set(usable_features))
+        st.caption(f"Ignored empty/all-missing features: {', '.join(skipped)}")
+
+    raw_matrix = raw_matrix[usable_features]
+    if missing_strategy == "Drop rows with missing values":
+        clean = raw_matrix.dropna()
+    else:
+        medians = raw_matrix.median()
+        clean = raw_matrix.fillna(medians).fillna(0.0)
+
     if len(clean) < 5:
-        st.warning("Not enough valid rows after removing missing values.")
+        st.warning("Not enough valid rows after applying missing-value handling.")
         return
 
     do_scale = st.checkbox("Standardize features before PCA", value=True, key="pca_scale")
     matrix = clean.copy()
     if do_scale:
-        matrix = pd.DataFrame(StandardScaler().fit_transform(matrix), columns=features, index=clean.index)
+        matrix = pd.DataFrame(StandardScaler().fit_transform(matrix), columns=usable_features, index=clean.index)
 
     max_comp = min(10, len(features), len(matrix))
     comp_n = st.slider("Number of components", 2, max_comp, min(4, max_comp), key="pca_components")

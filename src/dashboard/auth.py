@@ -12,7 +12,28 @@ def get_secret(name: str, default: str | None = None) -> str | None:
     return os.getenv(name, default)
 
 
+def get_bool_secret(*names: str, default: bool) -> bool:
+    truthy = {"1", "true", "yes", "on"}
+    falsy = {"0", "false", "no", "off"}
+
+    for name in names:
+        value = get_secret(name)
+        if value is None:
+            continue
+        normalized = value.strip().lower()
+        if normalized in truthy:
+            return True
+        if normalized in falsy:
+            return False
+
+    return default
+
+
 def require_login() -> None:
+    show_password_gate = get_bool_secret("SHOW_PASSWORD", default=True)
+    if not show_password_gate:
+        return
+
     expected_password = get_secret("APP_PASSWORD")
     expected_username = get_secret("APP_USERNAME", "admin")
 
@@ -37,7 +58,7 @@ def require_login() -> None:
     _, center, _ = st.columns([1.0, 1.25, 1.0])
     with center:
         with st.form("login", clear_on_submit=False):
-            username = st.text_input("Username", value="admin")
+            username = st.text_input("Username", value=expected_username)
             password = st.text_input("Password", type="password")
             submitted = st.form_submit_button("Enter Dashboard")
 

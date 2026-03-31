@@ -39,6 +39,7 @@ PowerShell:
 ```powershell
 $env:APP_USERNAME = "admin"
 $env:APP_PASSWORD = "change-me"
+$env:SHOW_PASSWORD = "1"
 ```
 
 CMD:
@@ -46,6 +47,7 @@ CMD:
 ```bat
 set APP_USERNAME=admin
 set APP_PASSWORD=change-me
+set SHOW_PASSWORD=1
 ```
 
 3. Start the app.
@@ -63,6 +65,7 @@ Secrets TOML:
 ```toml
 APP_USERNAME = "admin"
 APP_PASSWORD = "change-me"
+SHOW_PASSWORD = "1"
 ```
 
 Theme TOML:
@@ -89,10 +92,12 @@ gatherUsageStats = false
 ```toml
 APP_USERNAME = "admin"
 APP_PASSWORD = "your-strong-password"
+SHOW_PASSWORD = "1"
 ```
 
 ## Notes
 
 - This repo no longer stores a `.streamlit/` folder.
 - Authentication reads Streamlit Secrets first, then falls back to environment variables.
+- `SHOW_PASSWORD` controls whether the login gate is shown (`1` = show login, `0` = skip login).
 - Theme styling is implemented in `src/dashboard/theme.css` and can be complemented by TOML theme values in your deploy environment.

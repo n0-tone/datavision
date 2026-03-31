@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -31,7 +33,12 @@ def detect_datetime_candidates(df: pd.DataFrame) -> list[str]:
         if sample.empty:
             continue
 
-        parsed = pd.to_datetime(sample, errors="coerce")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            try:
+                parsed = pd.to_datetime(sample, errors="coerce", format="mixed")
+            except (TypeError, ValueError):
+                parsed = pd.to_datetime(sample, errors="coerce")
         if parsed.notna().mean() >= 0.75:
             candidates.append(col)
 
@@ -39,7 +46,7 @@ def detect_datetime_candidates(df: pd.DataFrame) -> list[str]:
 
 
 def split_columns(df: pd.DataFrame) -> tuple[list[str], list[str]]:
-    numeric = df.select_dtypes(include="number").columns.tolist()
+    numeric = [c for c in df.select_dtypes(include="number").columns.tolist() if df[c].notna().any()]
     categorical = [
         c
         for c in df.columns
