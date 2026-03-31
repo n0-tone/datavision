@@ -8,8 +8,21 @@ import streamlit as st
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.metrics import silhouette_score
+from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    f1_score,
+    mean_absolute_error,
+    mean_squared_error,
+    precision_score,
+    r2_score,
+    recall_score,
+    silhouette_score,
+)
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
 from .data_ops import build_auto_insights, build_outlier_table, detect_datetime_candidates
 
@@ -642,6 +655,302 @@ def render_feature_importance_tab(df: pd.DataFrame) -> None:
     st.plotly_chart(fig, width="stretch")
 
     st.dataframe(imp, width="stretch", hide_index=True)
+
+
+def render_supervised_models_tab(df: pd.DataFrame) -> None:
+    st.subheader("Supervised Models")
+    st.caption("Train and evaluate linear/logistic regression, decision tree, and random forest.")
+
+    target = st.selectbox("Target column", options=df.columns.tolist(), key="sup_target")
+    candidate_features = [
+        c
+        for c in df.columns
+        if c != target and not pd.api.types.is_datetime64_any_dtype(df[c])
+    ]
+    if not candidate_features:
+        st.warning("No usable feature columns available.")
+        return
+
+    features = st.multiselect(
+        "Feature columns",
+        options=candidate_features,
+        default=candidate_features[: min(8, len(candidate_features))],
+        key="sup_features",
+    )
+    if not features:
+        st.info("Select at least one feature column.")
+        return
+
+    mode = st.selectbox("Task type", ["Auto", "Classification", "Regression"], key="sup_mode")
+    missing_strategy = st.selectbox(
+        "Missing value handling",
+        ["Median/Mode imputation", "Drop rows with missing values"],
+        key="sup_missing_strategy",
+    )
+    test_size = st.slider("Test set (%)", 10, 40, 20, key="sup_test_size")
+    max_rows = st.slider("Max rows for training", 200, 30000, 10000, 200, key="sup_max_rows")
+
+    x_raw = df[features].copy()
+    y_raw = df[target].copy()
+
+    if missing_strategy == "Drop rows with missing values":
+        valid_mask = x_raw.notna().all(axis=1) & y_raw.notna()
+        x_raw = x_raw.loc[valid_mask]
+        y_raw = y_raw.loc[valid_mask]
+
+    feature_fill_values: dict[str, float | str] = {}
+    for col in x_raw.columns:
+        if pd.api.types.is_numeric_dtype(x_raw[col]):
+            numeric_col = pd.to_numeric(x_raw[col], errors="coerce")
+            median_value = numeric_col.median()
+            fill_value = float(median_value) if pd.notna(median_value) else 0.0
+            feature_fill_values[col] = fill_value
+            if missing_strategy != "Drop rows with missing values":
+                x_raw[col] = numeric_col.fillna(fill_value)
+            else:
+                x_raw[col] = numeric_col
+        else:
+            mode_values = x_raw[col].astype(str).replace("nan", np.nan).mode(dropna=True)
+            fill_value = mode_values.iloc[0] if not mode_values.empty else "<missing>"
+            feature_fill_values[col] = str(fill_value)
+            if missing_strategy != "Drop rows with missing values":
+                x_raw[col] = x_raw[col].astype(str).replace("nan", np.nan).fillna(str(fill_value))
+            else:
+                x_raw[col] = x_raw[col].astype(str)
+
+    resolved_mode = mode
+    if mode == "Auto":
+        numeric_target = pd.to_numeric(y_raw, errors="coerce")
+        is_regression_like = (
+            pd.api.types.is_numeric_dtype(y_raw)
+            and numeric_target.notna().mean() >= 0.9
+            and numeric_target.nunique(dropna=True) > 14
+        )
+        resolved_mode = "Regression" if is_regression_like else "Classification"
+
+    if resolved_mode == "Regression":
+        y_data = pd.to_numeric(y_raw, errors="coerce")
+        valid_mask = y_data.notna()
+        x_data = x_raw.loc[valid_mask]
+        y_data = y_data.loc[valid_mask]
+    else:
+        y_labels = y_raw.fillna("<missing>").astype(str)
+        y_codes, classes = pd.factorize(y_labels, sort=True)
+        x_data = x_raw
+        y_data = pd.Series(y_codes, index=y_labels.index)
+
+    if len(x_data) < 40:
+        st.warning("Not enough valid rows for supervised training.")
+        return
+
+    if len(x_data) > max_rows:
+        sampled_idx = x_data.sample(max_rows, random_state=42).index
+        x_data = x_data.loc[sampled_idx]
+        y_data = y_data.loc[sampled_idx]
+
+    x_encoded = pd.get_dummies(x_data, drop_first=False)
+    if x_encoded.empty:
+        st.warning("Feature encoding produced an empty matrix.")
+        return
+
+    if resolved_mode == "Regression":
+        model_name = st.selectbox(
+            "Model",
+            ["Linear Regression", "Decision Tree Regressor", "Random Forest Regressor"],
+            key="sup_model_reg",
+        )
+    else:
+        model_name = st.selectbox(
+            "Model",
+            ["Logistic Regression", "Decision Tree Classifier", "Random Forest Classifier"],
+            key="sup_model_clf",
+        )
+
+    test_fraction = test_size / 100.0
+    stratify = None
+    if resolved_mode == "Classification":
+        class_counts = y_data.value_counts()
+        if len(class_counts) > 1 and class_counts.min() >= 2:
+            stratify = y_data
+
+    try:
+        x_train, x_test, y_train, y_test = train_test_split(
+            x_encoded,
+            y_data,
+            test_size=test_fraction,
+            random_state=42,
+            stratify=stratify,
+        )
+    except ValueError as exc:
+        st.warning(f"Unable to split data for training: {exc}")
+        return
+
+    if resolved_mode == "Regression":
+        if model_name == "Linear Regression":
+            model = LinearRegression()
+        elif model_name == "Decision Tree Regressor":
+            max_depth = st.slider("Tree max depth", 2, 40, 10, key="sup_reg_tree_depth")
+            model = DecisionTreeRegressor(max_depth=max_depth, random_state=42)
+        else:
+            n_estimators = st.slider("Forest trees", 50, 600, 260, 10, key="sup_reg_rf_estimators")
+            max_depth = st.slider("Forest max depth", 2, 40, 12, key="sup_reg_rf_depth")
+            model = RandomForestRegressor(
+                n_estimators=n_estimators,
+                max_depth=max_depth,
+                random_state=42,
+                n_jobs=-1,
+            )
+    else:
+        if model_name == "Logistic Regression":
+            model = LogisticRegression(max_iter=2400)
+        elif model_name == "Decision Tree Classifier":
+            max_depth = st.slider("Tree max depth", 2, 40, 10, key="sup_clf_tree_depth")
+            model = DecisionTreeClassifier(max_depth=max_depth, random_state=42)
+        else:
+            n_estimators = st.slider("Forest trees", 50, 600, 260, 10, key="sup_clf_rf_estimators")
+            max_depth = st.slider("Forest max depth", 2, 40, 12, key="sup_clf_rf_depth")
+            model = RandomForestClassifier(
+                n_estimators=n_estimators,
+                max_depth=max_depth,
+                random_state=42,
+                n_jobs=-1,
+            )
+
+    model.fit(x_train, y_train)
+    y_pred = model.predict(x_test)
+
+    st.markdown(f"##### Evaluation ({resolved_mode})")
+    if resolved_mode == "Regression":
+        mae = mean_absolute_error(y_test, y_pred)
+        rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
+        r2 = r2_score(y_test, y_pred)
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("MAE", f"{mae:,.4f}")
+        m2.metric("RMSE", f"{rmse:,.4f}")
+        m3.metric("R²", f"{r2:.4f}")
+
+        pred_df = pd.DataFrame({"actual": y_test, "predicted": y_pred})
+        fig_pred = px.scatter(
+            pred_df,
+            x="actual",
+            y="predicted",
+            title="Actual vs Predicted",
+            opacity=0.75,
+        )
+        fig_pred.update_layout(margin=dict(l=10, r=10, t=45, b=10))
+        st.plotly_chart(fig_pred, width="stretch")
+    else:
+        acc = accuracy_score(y_test, y_pred)
+        precision = precision_score(y_test, y_pred, average="weighted", zero_division=0)
+        recall = recall_score(y_test, y_pred, average="weighted", zero_division=0)
+        f1 = f1_score(y_test, y_pred, average="weighted", zero_division=0)
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Accuracy", f"{acc:.4f}")
+        m2.metric("Precision", f"{precision:.4f}")
+        m3.metric("Recall", f"{recall:.4f}")
+        m4.metric("F1", f"{f1:.4f}")
+
+        class_labels = [str(item) for item in classes] if "classes" in locals() else []
+        label_ids = list(range(len(class_labels))) if class_labels else None
+        cm = confusion_matrix(y_test, y_pred, labels=label_ids)
+        fig_cm = px.imshow(
+            cm,
+            text_auto=True,
+            labels={"x": "Predicted", "y": "Actual", "color": "Count"},
+            x=class_labels if class_labels else None,
+            y=class_labels if class_labels else None,
+            color_continuous_scale=[[0, "#122038"], [1, "#2de2c4"]],
+            title="Confusion Matrix",
+        )
+        fig_cm.update_layout(margin=dict(l=10, r=10, t=45, b=10), height=420)
+        st.plotly_chart(fig_cm, width="stretch")
+
+    if hasattr(model, "feature_importances_"):
+        importance = pd.DataFrame(
+            {"feature": x_encoded.columns, "importance": model.feature_importances_}
+        ).sort_values("importance", ascending=False)
+    elif hasattr(model, "coef_"):
+        if np.ndim(model.coef_) == 1:
+            coef_values = model.coef_
+        else:
+            coef_values = np.mean(np.abs(model.coef_), axis=0)
+        importance = pd.DataFrame({"feature": x_encoded.columns, "importance": np.abs(coef_values)})
+        importance = importance.sort_values("importance", ascending=False)
+    else:
+        importance = pd.DataFrame(columns=["feature", "importance"])
+
+    if not importance.empty:
+        st.markdown("##### Model Signals")
+        top_importance = importance.head(20).sort_values("importance")
+        fig_imp = px.bar(
+            top_importance,
+            x="importance",
+            y="feature",
+            orientation="h",
+            color="importance",
+            color_continuous_scale=["#182335", "#2de2c4"],
+            title=f"Top signals from {model_name}",
+        )
+        fig_imp.update_layout(margin=dict(l=10, r=10, t=45, b=10), showlegend=False)
+        st.plotly_chart(fig_imp, width="stretch")
+
+    st.markdown("##### Prediction / Classification Form")
+    with st.form("sup_prediction_form"):
+        input_values: dict[str, float | str] = {}
+        for col in features:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                default_value = float(feature_fill_values.get(col, 0.0))
+                input_values[col] = st.number_input(
+                    f"{col}",
+                    value=default_value,
+                    step=0.1,
+                    key=f"sup_form_num_{col}",
+                )
+            else:
+                options = sorted(df[col].dropna().astype(str).unique().tolist())
+                if not options:
+                    options = ["<missing>"]
+                default_choice = str(feature_fill_values.get(col, options[0]))
+                if default_choice not in options:
+                    options = [default_choice] + options
+                input_values[col] = st.selectbox(
+                    f"{col}",
+                    options=options,
+                    index=options.index(default_choice),
+                    key=f"sup_form_cat_{col}",
+                )
+
+        submitted = st.form_submit_button("Run Model")
+
+    if submitted:
+        prediction_row = pd.DataFrame([input_values])
+        for col in prediction_row.columns:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                numeric_value = pd.to_numeric(prediction_row[col], errors="coerce")
+                fallback_value = float(feature_fill_values.get(col, 0.0))
+                prediction_row[col] = numeric_value.fillna(fallback_value)
+            else:
+                prediction_row[col] = prediction_row[col].astype(str)
+
+        row_encoded = pd.get_dummies(prediction_row, drop_first=False)
+        row_encoded = row_encoded.reindex(columns=x_encoded.columns, fill_value=0)
+        pred_value = model.predict(row_encoded)[0]
+
+        if resolved_mode == "Regression":
+            st.success(f"Predicted {target}: {float(pred_value):,.4f}")
+        else:
+            class_labels = [str(item) for item in classes] if "classes" in locals() else []
+            predicted_label = class_labels[int(pred_value)] if class_labels else str(pred_value)
+            st.success(f"Predicted class for {target}: {predicted_label}")
+
+            if hasattr(model, "predict_proba") and class_labels:
+                probs = model.predict_proba(row_encoded)[0]
+                prob_df = pd.DataFrame({"class": class_labels, "probability": probs}).sort_values(
+                    "probability", ascending=False
+                )
+                st.dataframe(prob_df, width="stretch", hide_index=True)
 
 
 def render_time_series_tab(df: pd.DataFrame, numeric: list[str]) -> None:

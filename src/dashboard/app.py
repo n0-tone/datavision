@@ -17,17 +17,35 @@ from .visuals import (
     render_pca_tab,
     render_quality_tab,
     render_relationships_tab,
+    render_supervised_models_tab,
     render_time_series_tab,
 )
 
 
 def run_app() -> None:
-    st.set_page_config(page_title="no-tone | DataVision", page_icon="📊", layout="wide")
+    sidebar_open = st.session_state.get("sidebar_open", True)
+    st.set_page_config(
+        page_title="no-tone | DataVision",
+        page_icon="📊",
+        layout="wide",
+        initial_sidebar_state="expanded" if sidebar_open else "collapsed",
+    )
 
     apply_theme()
     require_login()
 
-    logout_clicked, uploaded_file = render_datavision_sidebar()
+    if not st.session_state.get("sidebar_open", True):
+        st.markdown("<div class='sidebar-reopen-wrap'>", unsafe_allow_html=True)
+        if st.button("Open Sidebar", key="sidebar_reopen_button"):
+            st.session_state.sidebar_open = True
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    logout_clicked, uploaded_file, close_sidebar_clicked = render_datavision_sidebar()
+    if close_sidebar_clicked:
+        st.session_state.sidebar_open = False
+        st.rerun()
+
     if logout_clicked:
         st.session_state.authenticated = False
         st.rerun()
@@ -64,6 +82,7 @@ def run_app() -> None:
         tab_clustering,
         tab_pca,
         tab_importance,
+        tab_supervised,
         tab_time,
         tab_insights,
     ) = st.tabs(
@@ -75,6 +94,7 @@ def run_app() -> None:
             "Clustering",
             "PCA",
             "Feature Importance",
+            "Supervised ML",
             "Time Series",
             "Auto Insights",
         ]
@@ -94,6 +114,8 @@ def run_app() -> None:
         render_pca_tab(filtered_df, numeric)
     with tab_importance:
         render_feature_importance_tab(filtered_df)
+    with tab_supervised:
+        render_supervised_models_tab(filtered_df)
     with tab_time:
         render_time_series_tab(filtered_df, numeric)
     with tab_insights:
