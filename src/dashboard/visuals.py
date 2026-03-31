@@ -187,10 +187,29 @@ def render_quality_tab(df: pd.DataFrame) -> None:
         .sort_values("missing", ascending=False)
     )
 
+    strict_complete_rows = int((~df.isna().any(axis=1)).sum())
+    quality_cols = [
+        c
+        for c in df.columns
+        if df[c].notna().any() and not str(c).strip().lower().startswith("unnamed:")
+    ]
+    if not quality_cols:
+        quality_cols = [c for c in df.columns if df[c].notna().any()]
+    if not quality_cols:
+        quality_cols = df.columns.tolist()
+
+    complete_rows = int((~df[quality_cols].isna().any(axis=1)).sum())
+
     q1, q2, q3 = st.columns(3)
     q1.metric("Total Missing", f"{int(missing['missing'].sum()):,}")
     q2.metric("Duplicate Rows", f"{int(df.duplicated().sum()):,}")
-    q3.metric("Complete Rows", f"{int((~df.isna().any(axis=1)).sum()):,}")
+    q3.metric("Complete Rows", f"{complete_rows:,}")
+
+    if strict_complete_rows != complete_rows:
+        st.caption(
+            f"Strict all-column complete rows: {strict_complete_rows:,}. "
+            "Displayed complete rows ignore fully empty helper columns."
+        )
 
     left, right = st.columns([1, 1.1])
     with left:
