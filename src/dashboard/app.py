@@ -23,28 +23,22 @@ from .visuals import (
 
 
 def run_app() -> None:
-    sidebar_open = st.session_state.get("sidebar_open", True)
     st.set_page_config(
         page_title="no-tone | DataVision",
         page_icon="📊",
         layout="wide",
-        initial_sidebar_state="expanded" if sidebar_open else "collapsed",
+        initial_sidebar_state="expanded",
     )
 
     apply_theme()
     require_login()
 
-    if not st.session_state.get("sidebar_open", True):
-        st.markdown("<div class='sidebar-reopen-wrap'>", unsafe_allow_html=True)
-        if st.button("Open Sidebar", key="sidebar_reopen_button"):
-            st.session_state.sidebar_open = True
-            st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    logout_clicked, uploaded_file, close_sidebar_clicked = render_datavision_sidebar()
-    if close_sidebar_clicked:
-        st.session_state.sidebar_open = False
+    st.markdown("<div class='sidebar-reopen-wrap'>", unsafe_allow_html=True)
+    if st.button("▸", key="sidebar_reopen_button", help="Reopen sidebar"):
         st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    logout_clicked, uploaded_file = render_datavision_sidebar()
 
     if logout_clicked:
         st.session_state.authenticated = False

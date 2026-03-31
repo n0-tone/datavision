@@ -589,8 +589,11 @@ def render_feature_importance_tab(df: pd.DataFrame) -> None:
         for col in x_data.columns:
             if pd.api.types.is_numeric_dtype(x_data[col]):
                 numeric_col = pd.to_numeric(x_data[col], errors="coerce")
-                median_value = numeric_col.median()
-                x_data[col] = numeric_col.fillna(median_value if pd.notna(median_value) else 0.0)
+                if numeric_col.notna().any():
+                    median_value = float(numeric_col.median())
+                else:
+                    median_value = 0.0
+                x_data[col] = numeric_col.fillna(median_value)
             else:
                 mode_values = x_data[col].mode(dropna=True)
                 fill_value = mode_values.iloc[0] if not mode_values.empty else "<missing>"
@@ -702,8 +705,10 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
     for col in x_raw.columns:
         if pd.api.types.is_numeric_dtype(x_raw[col]):
             numeric_col = pd.to_numeric(x_raw[col], errors="coerce")
-            median_value = numeric_col.median()
-            fill_value = float(median_value) if pd.notna(median_value) else 0.0
+            if numeric_col.notna().any():
+                fill_value = float(numeric_col.median())
+            else:
+                fill_value = 0.0
             feature_fill_values[col] = fill_value
             if missing_strategy != "Drop rows with missing values":
                 x_raw[col] = numeric_col.fillna(fill_value)

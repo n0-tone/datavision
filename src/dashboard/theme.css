@@ -205,6 +205,17 @@ h4 {
   top: 0.85rem;
   left: 0.85rem;
   z-index: 1000;
+  display: none;
+}
+
+.stApp:has([data-testid="stSidebar"][aria-expanded="false"])
+  .sidebar-reopen-wrap {
+  display: block;
+}
+
+.stApp:has([data-testid="stSidebar"][aria-expanded="true"])
+  .sidebar-reopen-wrap {
+  display: none;
 }
 
 .sidebar-reopen-wrap .stButton {
@@ -213,9 +224,24 @@ h4 {
 
 .sidebar-reopen-wrap .stButton > button {
   border-radius: 999px;
-  min-height: 2.2rem;
-  padding: 0.3rem 0.8rem;
-  font-size: 0.82rem;
+  min-height: 2rem;
+  min-width: 2rem;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: linear-gradient(
+    140deg,
+    rgba(12, 21, 34, 0.95),
+    rgba(18, 35, 56, 0.9)
+  );
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+}
+
+.sidebar-reopen-wrap .stButton > button:hover {
+  border-color: rgba(57, 224, 192, 0.65);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.34);
 }
 
 @media (max-width: 1024px) {
