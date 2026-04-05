@@ -39,6 +39,57 @@ def card_metric(container, label: str, value: str) -> None:
     )
 
 
+def _is_numeric_like(series: pd.Series, min_valid_ratio: float = 0.8) -> bool:
+    if pd.api.types.is_numeric_dtype(series):
+        return True
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return False
+
+    sample = series.dropna()
+    if sample.empty:
+        return False
+
+    numeric_sample = pd.to_numeric(sample, errors="coerce")
+    return bool(numeric_sample.notna().mean() >= min_valid_ratio)
+
+
+def _format_rule_number(value: float) -> str:
+    if not np.isfinite(value):
+        return "missing"
+    if value.is_integer():
+        return str(int(value))
+    if abs(value) >= 1000 or (0 < abs(value) < 0.01):
+        return f"{value:.3e}"
+    return f"{value:.4f}"
+
+
+def _build_decision_path_table(model, row_encoded: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    node_indicator = model.decision_path(row_encoded)
+    leaf_id = int(model.apply(row_encoded)[0])
+    node_indices = node_indicator.indices[node_indicator.indptr[0] : node_indicator.indptr[1]]
+
+    rows: list[dict[str, str]] = []
+    for step, node_id in enumerate(node_indices, start=1):
+        feature_idx = int(model.tree_.feature[node_id])
+        if feature_idx < 0:
+            continue
+
+        feature_name = row_encoded.columns[feature_idx]
+        threshold = float(model.tree_.threshold[node_id])
+        raw_value = float(row_encoded.iloc[0, feature_idx])
+        operator = "<=" if raw_value <= threshold else ">"
+        rows.append(
+            {
+                "step": str(step),
+                "feature": str(feature_name),
+                "value": _format_rule_number(raw_value),
+                "rule": f"{operator} {_format_rule_number(threshold)}",
+            }
+        )
+
+    return pd.DataFrame(rows), leaf_id
+
+
 def render_hero(df: pd.DataFrame) -> None:
     st.markdown(
         """
@@ -554,7 +605,7 @@ def render_feature_importance_tab(df: pd.DataFrame) -> None:
     st.caption("Model-based ranking using Random Forest.")
 
     target = st.selectbox("Target column", options=df.columns.tolist(), key="fi_target")
-    candidate_features = [c for c in df.columns if c != target]
+    candidate_features = [c for c in df.columns if c != target and not pd.api.types.is_datetime64_any_dtype(df[c])]
     if not candidate_features:
         st.warning("No feature columns available.")
         return
@@ -581,23 +632,30 @@ def render_feature_importance_tab(df: pd.DataFrame) -> None:
     x_data = df[features].copy()
     y_raw = df[target].copy()
 
+    for col in x_data.columns:
+        if _is_numeric_like(x_data[col]):
+            numeric_col = pd.to_numeric(x_data[col], errors="coerce")
+            if numeric_col.notna().any():
+                median_value = float(numeric_col.median())
+            else:
+                median_value = 0.0
+            if missing_strategy == "Drop rows with missing values":
+                x_data[col] = numeric_col
+            else:
+                x_data[col] = numeric_col.fillna(median_value)
+        else:
+            text_values = x_data[col].astype(str).replace("nan", np.nan)
+            mode_values = text_values.mode(dropna=True)
+            fill_value = mode_values.iloc[0] if not mode_values.empty else "<missing>"
+            if missing_strategy == "Drop rows with missing values":
+                x_data[col] = text_values
+            else:
+                x_data[col] = text_values.fillna(fill_value)
+
     if missing_strategy == "Drop rows with missing values":
         valid_mask = x_data.notna().all(axis=1) & y_raw.notna()
         x_data = x_data.loc[valid_mask]
         y_raw = y_raw.loc[valid_mask]
-    else:
-        for col in x_data.columns:
-            if pd.api.types.is_numeric_dtype(x_data[col]):
-                numeric_col = pd.to_numeric(x_data[col], errors="coerce")
-                if numeric_col.notna().any():
-                    median_value = float(numeric_col.median())
-                else:
-                    median_value = 0.0
-                x_data[col] = numeric_col.fillna(median_value)
-            else:
-                mode_values = x_data[col].mode(dropna=True)
-                fill_value = mode_values.iloc[0] if not mode_values.empty else "<missing>"
-                x_data[col] = x_data[col].astype(str).replace("nan", np.nan).fillna(fill_value)
 
     if len(x_data) < 30:
         st.warning("Not enough valid rows for feature importance modeling.")
@@ -615,7 +673,7 @@ def render_feature_importance_tab(df: pd.DataFrame) -> None:
 
     resolved_mode = mode
     if mode == "Auto":
-        if pd.api.types.is_numeric_dtype(y_raw) and y_raw.nunique(dropna=True) > 20:
+        if _is_numeric_like(y_raw) and pd.to_numeric(y_raw, errors="coerce").nunique(dropna=True) > 20:
             resolved_mode = "Regression"
         else:
             resolved_mode = "Classification"
@@ -629,14 +687,22 @@ def render_feature_importance_tab(df: pd.DataFrame) -> None:
             st.warning("Target is not suitable for regression after numeric conversion.")
             return
         model = RandomForestRegressor(n_estimators=240, random_state=42, n_jobs=-1)
-        model.fit(x_fit, y_fit)
+        try:
+            model.fit(x_fit, y_fit)
+        except ValueError as exc:
+            st.warning(f"Feature importance training failed: {exc}")
+            return
     else:
         y_fit, classes = pd.factorize(y_raw.fillna("<missing>").astype(str))
         if len(np.unique(y_fit)) < 2:
             st.warning("Classification target needs at least two classes.")
             return
         model = RandomForestClassifier(n_estimators=260, random_state=42, n_jobs=-1)
-        model.fit(x_train, y_fit)
+        try:
+            model.fit(x_train, y_fit)
+        except ValueError as exc:
+            st.warning(f"Feature importance training failed: {exc}")
+            return
         st.caption(f"Detected classes: {len(classes)}")
         x_fit = x_train
 
@@ -662,7 +728,9 @@ def render_feature_importance_tab(df: pd.DataFrame) -> None:
 
 def render_supervised_models_tab(df: pd.DataFrame) -> None:
     st.subheader("Supervised Models")
-    st.caption("Train and evaluate linear/logistic regression, decision tree, and random forest.")
+    st.caption(
+        "Train linear/logistic regression and decision-tree models, then simulate new predictions directly in the app."
+    )
 
     target = st.selectbox("Target column", options=df.columns.tolist(), key="sup_target")
     candidate_features = [
@@ -677,7 +745,7 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
     default_features = [
         c
         for c in candidate_features
-        if pd.api.types.is_numeric_dtype(df[c]) or df[c].nunique(dropna=True) <= 80
+        if _is_numeric_like(df[c]) or df[c].nunique(dropna=True) <= 80
     ]
     if not default_features:
         default_features = candidate_features
@@ -723,7 +791,7 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
     if mode == "Auto":
         target_preview = pd.to_numeric(df[target], errors="coerce")
         is_regression_like = (
-            pd.api.types.is_numeric_dtype(df[target])
+            _is_numeric_like(df[target])
             and target_preview.notna().mean() >= 0.9
             and target_preview.nunique(dropna=True) > 14
         )
@@ -790,24 +858,20 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
             x_raw = df[features].copy()
             y_raw = df[target].copy()
 
-            if missing_strategy == "Drop rows with missing values":
-                valid_mask = x_raw.notna().all(axis=1) & y_raw.notna()
-                x_raw = x_raw.loc[valid_mask]
-                y_raw = y_raw.loc[valid_mask]
-
             feature_fill_values: dict[str, float | str] = {}
             category_maps: dict[str, list[str]] = {}
             numeric_features: list[str] = []
-            categorical_features: list[str] = []
+            feature_types: dict[str, str] = {}
 
             for col in x_raw.columns:
-                if pd.api.types.is_numeric_dtype(x_raw[col]):
+                if _is_numeric_like(x_raw[col]):
                     numeric_col = pd.to_numeric(x_raw[col], errors="coerce")
                     if numeric_col.notna().any():
                         fill_value = float(numeric_col.median())
                     else:
                         fill_value = 0.0
                     feature_fill_values[col] = fill_value
+                    feature_types[col] = "numeric"
                     if missing_strategy != "Drop rows with missing values":
                         x_raw[col] = numeric_col.fillna(fill_value)
                     else:
@@ -818,19 +882,33 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
                     mode_values = text_values.mode(dropna=True)
                     fill_value = mode_values.iloc[0] if not mode_values.empty else "<missing>"
                     feature_fill_values[col] = str(fill_value)
-                    filled = text_values.fillna(str(fill_value))
-                    top_values = filled.value_counts().head(max_category_levels).index.tolist()
+                    feature_types[col] = "categorical"
+                    if missing_strategy != "Drop rows with missing values":
+                        filled = text_values.fillna(str(fill_value))
+                    else:
+                        filled = text_values
+                    top_values = filled.dropna().value_counts().head(max_category_levels).index.tolist()
                     if not top_values:
                         top_values = [str(fill_value)]
-                    x_raw[col] = filled.where(filled.isin(top_values), "<other>")
+                    if missing_strategy != "Drop rows with missing values":
+                        x_raw[col] = filled.where(filled.isin(top_values), "<other>")
+                    else:
+                        x_raw[col] = filled.where(filled.isna() | filled.isin(top_values), "<other>")
                     category_maps[col] = top_values
-                    categorical_features.append(col)
+
+            if missing_strategy == "Drop rows with missing values":
+                valid_mask = x_raw.notna().all(axis=1) & y_raw.notna()
+                dropped_rows = int((~valid_mask).sum())
+                x_raw = x_raw.loc[valid_mask]
+                y_raw = y_raw.loc[valid_mask]
+            else:
+                dropped_rows = 0
 
             resolved_mode = mode
             if mode == "Auto":
                 numeric_target = pd.to_numeric(y_raw, errors="coerce")
                 is_regression_like = (
-                    pd.api.types.is_numeric_dtype(y_raw)
+                    _is_numeric_like(y_raw)
                     and numeric_target.notna().mean() >= 0.9
                     and numeric_target.nunique(dropna=True) > 14
                 )
@@ -930,8 +1008,12 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
                         n_jobs=-1,
                     )
 
-            model.fit(x_train, y_train)
-            y_pred = model.predict(x_test)
+            try:
+                model.fit(x_train, y_train)
+                y_pred = model.predict(x_test)
+            except ValueError as exc:
+                st.warning(f"Model training failed: {exc}")
+                return
 
             if resolved_mode == "Regression":
                 metrics = {
@@ -966,6 +1048,7 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
                 "resolved_mode": resolved_mode,
                 "target": target,
                 "features": features,
+                "feature_types": feature_types,
                 "feature_fill_values": feature_fill_values,
                 "category_maps": category_maps,
                 "x_columns": x_encoded.columns.tolist(),
@@ -976,6 +1059,8 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
                 "class_labels": class_labels,
                 "pred_df": pd.DataFrame({"actual": y_test, "predicted": y_pred}),
                 "dropped_encoded": dropped_encoded,
+                "dropped_rows": dropped_rows,
+                "model_name": model_name,
             }
             st.session_state[signature_key] = config_signature
 
@@ -989,6 +1074,11 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
     if current_signature != config_signature:
         st.info("Configuration changed. Click Train / Refresh Model to update results.")
         return
+
+    if artifact.get("dropped_rows", 0) > 0:
+        st.caption(
+            f"Dropped {artifact['dropped_rows']} rows after coercing invalid values during training preparation."
+        )
 
     if artifact.get("dropped_encoded", 0) > 0:
         st.caption(
@@ -1048,16 +1138,21 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
             orientation="h",
             color="importance",
             color_continuous_scale=["#182335", "#2de2c4"],
-            title=f"Top signals from {model_name}",
+            title=f"Top signals from {artifact['model_name']}",
         )
         fig_imp.update_layout(margin=dict(l=10, r=10, t=45, b=10), showlegend=False)
         st.plotly_chart(fig_imp, width="stretch")
 
-    st.markdown("##### Prediction / Classification Form")
+    st.markdown("##### Model Simulation")
+    if "Decision Tree" in artifact["model_name"]:
+        st.caption("Use this form to simulate how the trained decision tree handles a new case.")
+    else:
+        st.caption("Use this form to simulate predictions for new data points.")
+
     with st.form("sup_prediction_form"):
         input_values: dict[str, float | str] = {}
         for col in artifact["features"]:
-            if pd.api.types.is_numeric_dtype(df[col]):
+            if artifact["feature_types"].get(col) == "numeric":
                 default_value = float(artifact["feature_fill_values"].get(col, 0.0))
                 input_values[col] = st.number_input(
                     f"{col}",
@@ -1085,7 +1180,7 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
     if submitted:
         prediction_row = pd.DataFrame([input_values])
         for col in prediction_row.columns:
-            if pd.api.types.is_numeric_dtype(df[col]):
+            if artifact["feature_types"].get(col) == "numeric":
                 numeric_value = pd.to_numeric(prediction_row[col], errors="coerce")
                 fallback_value = float(artifact["feature_fill_values"].get(col, 0.0))
                 prediction_row[col] = numeric_value.fillna(fallback_value)
@@ -1110,6 +1205,16 @@ def render_supervised_models_tab(df: pd.DataFrame) -> None:
                 prob_df = pd.DataFrame({"class": class_labels, "probability": probs})
                 prob_df = prob_df.sort_values("probability", ascending=False).head(10)
                 st.dataframe(prob_df, width="stretch", hide_index=True)
+
+        if "Decision Tree" in artifact["model_name"]:
+            path_df, leaf_id = _build_decision_path_table(artifact["model"], row_encoded)
+            st.markdown("##### Decision Tree Path")
+            if path_df.empty:
+                st.info("The trained tree did not create any split for this prediction.")
+            else:
+                st.dataframe(path_df, width="stretch", hide_index=True)
+                leaf_samples = int(artifact["model"].tree_.n_node_samples[leaf_id])
+                st.caption(f"Simulation ended in leaf node {leaf_id} with {leaf_samples} training samples.")
 
 
 def render_time_series_tab(

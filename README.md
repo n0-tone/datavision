@@ -15,6 +15,8 @@ Takes inspiration from this [repository](https://github.com/Otherwa/CSVDash).
 - Clustering (K-Means, elbow curve, silhouette score, cluster profiles, PCA projection).
 - PCA analysis (explained variance and projections).
 - Feature importance with Random Forest (classification/regression).
+- Supervised models: Linear Regression, Logistic Regression, Decision Trees, and Random Forest.
+- Model simulation form for testing new cases after training, including Decision Tree path inspection.
 - Time series analysis (date parsing, resampling, rolling trend).
 - Auto insights summary.
 
